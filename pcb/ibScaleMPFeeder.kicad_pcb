@@ -38071,7 +38071,7 @@
 			)
 		)
 	)
-	(gr_text "2025-05-16\nv.0.0.3\nGIT 08884e31d0"
+	(gr_text "2025-05-16\nv.0.0.3\nGIT 417de4e968"
 		(at 125.476 88.138 0)
 		(layer "F.SilkS")
 		(uuid "9115269e-a573-4506-bf69-8bc5bba86dec")
@@ -38107,7 +38107,7 @@
 			(justify mirror)
 		)
 	)
-	(gr_text "MPFeeder\n2025-05-16\nv.0.0.3\nGIT 08884e31d0"
+	(gr_text "MPFeeder\n2025-05-16\nv.0.0.3\nGIT 417de4e968"
 		(at 108.3564 55.830914 180)
 		(layer "B.SilkS")
 		(uuid "58bcb41d-1800-44e2-855d-180df458d2c6")
