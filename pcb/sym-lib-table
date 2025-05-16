@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "ibScale")(type "KiCad")(uri "${KIPRJMOD}/library/symbols/ibScale.kicad_sym")(options "")(descr ""))
+)
