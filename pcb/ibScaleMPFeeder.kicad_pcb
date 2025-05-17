@@ -7,6 +7,15 @@
 		(legacy_teardrops no)
 	)
 	(paper "A4")
+	(title_block
+		(title "MPFeeder")
+		(date "2025-05-16")
+		(rev "0.0.3")
+		(company "CERN-OHL-S-2.0")
+		(comment 1 "417de4e968")
+		(comment 2 "Based on Opulo LumenPNP Rev 12 Feeder mobo")
+		(comment 3 "All 3.3V MLCC ≥16V ±10% ≥X5R; All 10V MLCC ≥25V; All resistors 1% ≥0.1w")
+	)
 	(layers
 		(0 "F.Cu" signal)
 		(4 "In1.Cu" power)
@@ -53570,4 +53579,26 @@
 		)
 	)
 	(embedded_fonts no)
+	(embedded_files
+		(file
+			(name "ibScale-title.kicad_wks")
+			(type worksheet)
+			(data |KLUv/WBjCu0WAIZgZiEA1TZqxSYpBF8GGYqrWTcBDLPMvDDrcV2HRrZZ+v8JBRNcAFYAYABiN/6H
+				t6j/tUfq73DyptXHzNmdqPkNDgu3TuqdB7MIjzks3Fkdl3L5I/wEACBAgh6XdF6Uhtr6M4g1IUn5
+				1t9tPGIOARAoXLXWylLro87lxiECIFB+RBqw+/KHECDPtV4zkr1OPc+jtQIEftSb6td6qUmqUv4j
+				/N5fWl3r9JJG+xvzd5jEe+Nx6+9Dp06pz6dDz3H4+R133sERpHfnlP+IRVF/1q2DI7Yqp7X67+5L
+				inIcGHcsdFoCw0kAbpR/J2698Y3JjlLRKBmllC1gqD23lF6Hae2G0SohXLkuyh91Wo7RKplsloqG
+				0SwyxfYwDe68TmvF5sER10njsoVGu1gsm2ngCfzdYu9N2vhH/Dlpk78MgYKl1rTVdbis6glua1xr
+				KXZhs7IHe7EKu/Zg1aqi1qTWsXlZTqJFSGNHilpxq0lvRpJRIhPFlyEIB5dROE1zWK6rmlYkk2iQ
+				jZEZXw67z24pPUxaNQi3ceFnzlYw+weAkKARSaQUTUkKkhQyzAGARKTmqA573MwA3f7OwOYRuMEW
+				qe3LViO8cOBttqH98OfXWFegfN2DY86cDoFYQArpWN+cAe/eZcG/f5ng3FNs55d1+XxAgM0qjIJ9
+				yf4DJHO7eMt5avgEAXeITvhFikLOQI7ZPGfO+MiwpDuhb8aUawBbErCaDqEHWpm1aHosZ3oGfYmg
+				UwwRA2sO4q67qnUPJgaxjSUoCwJa/0dSuAC4mAvA4oyPQfRJl6SxiWWLSI7mlWyesWsYNYxHxzJF
+				PwKI0Mkc9U8MGWGAXmZmf14PSUgjgE+iO5WizIcT594munPFHvbwn10OQJDlEz2qAzJbmNkJOEiJ
+				9gqv4pBrAYK73+jZGTp0WSZeFHBG7WLJLybtoZNeoW2T1SGPKnZyRNx4qZTeFQp7fEe8902HkI2P
+				XgU=|
+			)
+			(checksum "18C5A3A11531608EF1D02F34FFFE6CB0")
+		)
+	)
 )
