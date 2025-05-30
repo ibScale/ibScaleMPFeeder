@@ -6,7 +6,7 @@ A **Micropython-based SMD tape feeder** to replace the LumenPNP Feeder motherboa
 
 ## Description
 
-This project provides software control for SMD (Surface Mount Device) tape feeders using MicroPython on embedded hardware. The hardware and software is a complete re-implementation of the LumenPNP Rev12 feeder motherboard from Opulo, inc. Only the physical outline and connector/button positions were retained from the old feeder design. This project was born out of the need for less costly and a more robust design.
+This is a direct drop-in replacement for the LumenPNP feeder motherboard for the 8mm and 10mm feeder. This is a complete re-implementation with the exception of the board outline, connector/button, and mounting hole positions. It's compatible with the stock 8/10mm feeder bodies.
 
 ## Licensing
 
@@ -65,7 +65,7 @@ README.md           # This file
 
 ## Configuration
 
-By default the feeder will present a USB Flash Device and a USB Serial portto the host system. The preferred way to interact with the device with with `mpremote` installable through `pip`, but any serial terminal program will work for accessing the console. `mpremote` gives you other features like being able to copy files to/from the device, reboot it, and some other micropython specific features.
+By default the feeder will appear as a USB Flash Device and a USB Serial port to the host system. The preferred way to interact with the device is with `mpremote` which is installable through `pip`. Any serial terminal program will work for accessing the serial console but `mpremote` gives you advanced features like being able to copy files to/from the device, reboot it, put it into bootloader mode, and some other micropython specific features.
 
 The full extent of the configuration options are located in the defaults.py file under the `mpy/lib` directory. These will be stored on the flash in the `sysconfig.json` during initial boot. You can either edit the raw json and reboot or update the sysconfig from the REPL directly, I.E. `SYSCONFIG.set('SYSTEM.DEBUG', True)` or `SYSCONFIG.set('SERVO.MAX', 75)`. Most settings should be good in their default state.
 
