@@ -1,0 +1,15 @@
+{
+    "deploy": [
+        "deploy.md"
+    ],
+    "docs": "",
+    "features": [],
+    "images": [
+        "ibScaleMPFeeder.jpg"
+    ],
+    "mcu": "stm32f411",
+    "product": "ibScale MPFeeder for LumenPNP",
+    "thumbnail": "",
+    "url": "https://github.com/ibScale/ibScaleMPFeeder",
+    "vendor": "ibScale"
+}
