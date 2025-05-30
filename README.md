@@ -8,7 +8,7 @@ This project provides software control for SMD (Surface Mount Device) tape feede
 
 ## Licensing
 
-- **Software (mpy)**: Licensed under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html)
+- **Software (mpy)**: Licensed under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.txt)
 - **Hardware (pcb)**: Licensed under [CERN-OHL-S-2.0](https://ohwr.org/cern_ohl_s_v2.txt)
 
 ## Copyright
@@ -22,6 +22,8 @@ Copyright (C) 2025 FexTel, Inc. <info@ibscale.com>
 - RS485 communication with Photon protocol
 - Performance monitoring and statistics
 - Hardware calibration utilities
+- USB-C 2.0 for DFU bootloader and setup
+- Multiple hardware improvements over original design
 
 ## Quick Start
 
@@ -50,8 +52,8 @@ pcb/
 │   ├── symbols/    # symbols
 │   ├── references/ # Reference materials
 │   └── ibScaleMPFeeder.pro  # Main KiCad project
-├── LICENSE.txt     # CERN-OHL-S-2.0 License
-└── README.md       # This file
+└── LICENSE.txt     # CERN-OHL-S-2.0 License
+README.md           # This file
 
 ```
 
@@ -59,7 +61,7 @@ pcb/
 
 After flashing initial firmware, copy over the contents of the 'flash' directory
 to the device and power-cycle it. When it reboots, press CTRl-C to bring up the
-menu and run the calibration to calibrate the new hardware settings.
+menu and run the calibration to calibrate the new hardware.
 
 ## Support
 
