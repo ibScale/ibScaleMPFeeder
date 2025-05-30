@@ -1,10 +1,12 @@
 # ibScaleMPFeeder
 
-A **Micropython-based SMD tape feeder** for the ibScale platform.
+![ibScaleMPFeeder](mpy/ibScaleMPFeeder.jpg)
+
+A **Micropython-based SMD tape feeder** to replace the LumenPNP Feeder motherboard. It's compatible with the stock housing and uses the Photon protocol for communication.
 
 ## Description
 
-This project provides software control for SMD (Surface Mount Device) tape feeders using MicroPython on embedded hardware.
+This project provides software control for SMD (Surface Mount Device) tape feeders using MicroPython on embedded hardware. The hardware and software is a complete re-implementation of the LumenPNP Rev12 feeder motherboard from Opulo, inc. Only the physical outline and connector/button positions were retained from the old feeder design. This project was born out of the need for less costly and a more robust design.
 
 ## Licensing
 
@@ -22,8 +24,10 @@ Copyright (C) 2025 FexTel, Inc. <info@ibscale.com>
 - RS485 communication with Photon protocol
 - Performance monitoring and statistics
 - Hardware calibration utilities
-- USB-C 2.0 for DFU bootloader and setup
-- Multiple hardware improvements over original design
+- USB-C 2.0 for DFU bootloader and diagnostics/setup
+- Improved DC-DC buck converter with reduced inrush capacitance
+- Less expensive hardware selection with better availability
+- Modular software design to allow for easier hardware changes
 
 ## Quick Start
 
@@ -66,3 +70,5 @@ menu and run the calibration to calibrate the new hardware.
 ## Support
 
 For support and more information, visit: <https://ibscale.com>
+
+For information on the LumenPNP and it's feeders, visit: <https://www.opulo.io/>

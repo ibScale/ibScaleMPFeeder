@@ -11,7 +11,7 @@ DEFAULT_SYSCONFIG = {
         'EEPROM_PIN': 'ONEWIRE',
         'EEPROM_DRIVER': 'DS28E07', # LumenPNP uses a Maxim DS28E07 by default
         'TICKS_010MM': 22.546, # How many ticks per 0.10mm
-        'PEEL_OVERRUN_MS': 1000, # How many ms to run peel motor after drive has stopped
+        'PEEL_OVERRUN_MS': 1000, # How many ms to run peel motor whenever drive is ran
         'FORWARD_MS': 1000, # How many ms for average forward movement
         'BACKWARD_MS': 1500, # How many ms for average backward movement
         'APP': 'app.py', # What to launch after we're done here
