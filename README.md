@@ -32,8 +32,10 @@ Copyright (C) 2025 FexTel, Inc. <info@ibscale.com>
 ## Quick Start
 
 1. Flash MicroPython firmware to your device
-2. Copy the `mpy/` directory to your device
-3. Run `main.py` to start the application
+2. Copy the contents of the `mpy/flash` directory to your device
+3. Reboot the device and connect to the USB serial port
+4. Press `CTRL-C` to bring up the menu and select calibrate
+5. After calibration, press `CTRL-D` to reboot or power cycle the feeder
 
 ## Directory Structure
 
@@ -63,9 +65,9 @@ README.md           # This file
 
 ## Configuration
 
-After flashing initial firmware, copy over the contents of the 'flash' directory
-to the device and power-cycle it. When it reboots, press CTRl-C to bring up the
-menu and run the calibration to calibrate the new hardware.
+By default the feeder will present a USB Flash Device and a USB Serial portto the host system. The preferred way to interact with the device with with `mpremote` installable through `pip`, but any serial terminal program will work for accessing the console. `mpremote` gives you other features like being able to copy files to/from the device, reboot it, and some other micropython specific features.
+
+The full extent of the configuration options are located in the defaults.py file under the `mpy/lib` directory. These will be stored on the flash in the `sysconfig.json` during initial boot. You can either edit the raw json and reboot or update the sysconfig from the REPL directly, I.E. `SYSCONFIG.set('SYSTEM.DEBUG', True)` or `SYSCONFIG.set('SERVO.MAX', 75)`. Most settings should be good in their default state.
 
 ## Support
 
