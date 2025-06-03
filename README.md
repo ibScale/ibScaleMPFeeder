@@ -57,7 +57,7 @@ pcb/
 │   ├── footprints/ # footprints
 │   ├── symbols/    # symbols
 │   ├── references/ # Reference materials
-│   └── ibScaleMPFeeder.pro  # Main KiCad project
+├── ibScaleMPFeeder.pro  # Main KiCad project
 └── LICENSE.txt     # CERN-OHL-S-2.0 License
 README.md           # This file
 
