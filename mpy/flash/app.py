@@ -129,8 +129,6 @@ def run_app(app_globals):
     ticks_per_mm = SYSCONFIG.get('SYSTEM.TICKS_010MM', 22.546) * 10
     jog_click_ticks = max(1, int(ticks_per_mm))         # ~1mm per short click
     jog_hold_ticks = max(1, int(ticks_per_mm * 200))    # far target; a held button feeds until released
-    # Speed profile for this feeder slot's parts (gentle/normal/fast); the future
-    # Photon feed path should read the same key.
     slot_profile = SYSCONFIG.get('SYSTEM.SLOT_PROFILE', 'normal')
 
     # Main loop settings

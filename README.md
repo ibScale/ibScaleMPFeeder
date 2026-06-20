@@ -17,17 +17,16 @@ The firmware is packaged as a self-contained appliance image — all Python modu
 
 ## Copyright
 
-Copyright (C) 2026 FexTel, Inc. <info@ibscale.com>
-[ibScale](https://www.ibscale.com)
+Copyright (C) 2026 FexTel, Inc. <info@ibscale.com>  
+[ibScale](https://www.ibscale.com)  
 **Author**: James Pearson
 
 ## Features
 
-- Profile-based servo control (gentle / normal / fast) with hardware quadrature encoder feedback
-- Stall detection and fault recovery state machine (IDLE → BACKOFF → APPROACH → SETTLE → FAULT)
-- Full Photon protocol implementation over RS485 at 57600 baud (compatible with LumenPNP)
-- Serial console accessible over USB (ESC × 3): calibration, auto-tune, config editor, dmesg, factory reset
-- Atomic sysconfig save (write + rename) — power-loss safe
+- Profile-based feeder control (gentle / normal / fast) with hardware quadrature encoder feedback
+- Stall detection and fault recovery state machine
+- Full Photon protocol implementation compatible with LumenPNP
+- Serial console accessible over USB (ESC × 3): calibration, auto-tune, config editor, dmesg, factory reset, etc
 - Hardware watchdog (optional, off by default)
 - Rolling performance statistics logged at each heartbeat tick
 - USB-C with DFU bootloader for firmware updates
@@ -86,6 +85,8 @@ brew install dfu-util
 Clone this repo alongside the MicroPython 1.28.0 source tree, then run the build script from the `mpy/` directory:
 
 ```bash
+git clone https://github.com/micropython/micropython.git
+git clone https://github.com/ibscale/ibScaleMPFeeder.git
 cd ibScaleMPFeeder/mpy
 ./compile-fw.sh [path-to-micropython]
 ```
@@ -146,7 +147,6 @@ To calibrate the feeder (required for accurate positioning):
 | Short click | Jog ~1 mm (grid-indexed, drift-free) |
 | Double-click | Zero the position reference |
 | Hold (long press) | Free-run feed until released |
-| Release after hold | Stop motor and re-anchor position grid |
 
 ### Serial Console
 
@@ -195,15 +195,13 @@ Key settings to know about:
 |---|---|---|
 | `SYSTEM.TICKS_010MM` | `22.546` | Encoder ticks per 0.10 mm — derived from hardware design; set manually if your encoder resolution differs |
 | `SYSTEM.SLOT_PROFILE` | `'normal'` | Speed profile for button jogs: `gentle`, `normal`, or `fast` |
-| `SYSTEM.WATCHDOG_S` | `0` | Hardware watchdog timeout in seconds; `0` = disabled. Max ~32s. Once armed, runs until reset |
-| `SYSTEM.DEBUG` | `False` | Verbose logging — generates significant serial output |
+| `SYSTEM.WATCHDOG_S` | `0` | Hardware watchdog timeout in seconds; `0` = disabled. Max 30 seconds. Once armed, runs until reset |
+| `SYSTEM.DEBUG` | `False` | Verbose logging — generates significant log output |
 | `SERVO.MAX` | `80` | Peak motor drive (0–100). Lower if parts overshoot consistently |
 | `SERVO.CREEP` | `15` | Terminal approach speed. Lower = more repeatable stop, too low = stall |
 | `SERVO.TOLERANCE` | `15` | In-tolerance window in encoder ticks to confirm a stop |
 | `SERVO.STALL_MS` | `300` | Fault if no encoder progress for this long while driving (jam detection) |
-| `SERVO.DEFAULT_PROFILE` | `'normal'` | Default speed profile for Photon feed commands |
 | `RS485.BAUDRATE` | `57600` | Must match the LumenPNP host setting |
-| `APP.WATCHDOG_S` | `0` | Alias — see `SYSTEM.WATCHDOG_S` |
 
 The `SERVO.PROFILES` block defines `gentle`, `normal`, and `fast` as scale factors on `SERVO.MAX` and `SERVO.ACCEL_TICKS`. The creep tail (`SERVO.CREEP` / `SERVO.CREEP_TICKS`) is shared across all profiles so stop accuracy is the same regardless of profile — only peak speed and acceleration change.
 

@@ -178,7 +178,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
             brake=servo_cfg.get('BRAKE', True),
             stall_ms=servo_cfg.get('STALL_MS', 300), stall_eps=servo_cfg.get('STALL_EPS', 3),
             move_timeout_ms=servo_cfg.get('MOVE_TIMEOUT_MS', 10000),
-            profiles=profiles, default_profile=servo_cfg.get('DEFAULT_PROFILE', 'normal'),
+            profiles=profiles, default_profile=SYSCONFIG.get('SYSTEM.SLOT_PROFILE', 'normal'),
             peel_enable=servo_cfg.get('PEEL_ENABLE', True), peel_speed=servo_cfg.get('PEEL_SPEED', 100),
             peel_time_ms=servo_cfg.get('PEEL_RUN_MS', 1000), debug_enabled=servo_cfg.get('DEBUG', debug_mode)
         )
