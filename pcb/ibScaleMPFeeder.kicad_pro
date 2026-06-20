@@ -92,30 +92,6 @@
           ""
         ],
         [
-          "copper_edge_clearance|118419869|107207914|34ade081-e8f4-4ece-b4e7-e1e7a89322e5|a1d7cc67-dd94-4911-828a-2edbff78c43f",
-          ""
-        ],
-        [
-          "copper_edge_clearance|133964808|112549078|5be9dd88-fcf1-4ba5-b714-50d6b2af968d|b5a725bc-57ad-4bab-91fd-d85b04a741de",
-          ""
-        ],
-        [
-          "copper_edge_clearance|137712474|108801412|5be9dd88-fcf1-4ba5-b714-50d6b2af968d|d2231445-f917-4c94-a31b-ca103de7db5f",
-          ""
-        ],
-        [
-          "copper_edge_clearance|139865275|106650986|5be9dd88-fcf1-4ba5-b714-50d6b2af968d|2037421b-bffe-4139-b17c-70bcc2fcd2d3",
-          ""
-        ],
-        [
-          "copper_edge_clearance|143612941|102903320|5be9dd88-fcf1-4ba5-b714-50d6b2af968d|9bf9224f-07ba-420c-a673-ffb50b61e79b",
-          ""
-        ],
-        [
-          "items_not_allowed|141166082|100471142|d7fd8ee3-ee72-497c-895e-d0191eed5920|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
           "starved_thermal|121896754|69616005|01403b98-f0be-49e0-896e-b063272f55cf|afe89f4e-9f50-4a7b-896f-0509d0c438e7|F.Cu",
           ""
         ],
@@ -141,6 +117,22 @@
         ],
         [
           "starved_thermal|131267200|68784300|01403b98-f0be-49e0-896e-b063272f55cf|d53acd0f-4d00-4e2f-8878-970c2c93a7c7|F.Cu",
+          ""
+        ],
+        [
+          "unconnected_items|120792600|105482400|F.Cu|4|5ca0b8a9-c714-4b7b-86c6-6379bfef5957|2ad49ed7-75cf-4fa3-bc85-acf2e9246dbb",
+          ""
+        ],
+        [
+          "unconnected_items|120850000|101975000|F.Cu|4|d8a80147-98d1-43f6-adf4-9fac192b16ad|c4cd63da-621c-4846-b1e1-81317d73c29d",
+          ""
+        ],
+        [
+          "unconnected_items|134530635|110730635|F.Cu|4|cec68ede-bff3-4c8e-8598-2949ce5162f6|b5a725bc-57ad-4bab-91fd-d85b04a741de",
+          ""
+        ],
+        [
+          "unconnected_items|138375647|106867247|F.Cu|4|2b19980d-1b26-4f05-91f2-0f02f546820d|02262c26-b507-4bc9-89e4-52696c2c131d",
           ""
         ]
       ],
