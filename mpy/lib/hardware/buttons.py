@@ -4,19 +4,19 @@
 
 # buttons.py - Manages a button state
 
-import machine
+import pyb
 import time
 
 class Button:
-    def __init__(self, pin_name, active_high=True, debounce_ms=50, double_click_ms=400, 
-                 long_press_ms=750, long_press_latch=True, SYSCONFIG=None, DMESG=None, LOG=False):
+    def __init__(self, pin_name, active_high=True, debounce_ms=50, double_click_ms=400,
+                 long_press_ms=750, SYSCONFIG=None, DMESG=None, LOG=False):
         self.dmesg = DMESG
         self.pin_name = pin_name
         self.log_debug = LOG or (SYSCONFIG.get('SYSTEM.DEBUG', False) if SYSCONFIG else False)
-        
+
         try:
-            self.pin = machine.Pin(pin_name, machine.Pin.IN, 
-                                   machine.Pin.PULL_DOWN if active_high else machine.Pin.PULL_UP)
+            self.pin = pyb.Pin(pin_name, pyb.Pin.IN,
+                               pyb.Pin.PULL_DOWN if active_high else pyb.Pin.PULL_UP)
             self._log(f"Init '{pin_name}' (AH={active_high}, DB={debounce_ms}, DC={double_click_ms}, LP={long_press_ms})", force=True)
         except ValueError as e:
             self._log(f"ERROR - Pin '{pin_name}' init failed: {e}", force=True)
@@ -24,8 +24,7 @@ class Button:
 
         self.active_high = active_high
         self.debounce_ms, self.dclick_ms, self.lpress_ms = debounce_ms, double_click_ms, long_press_ms
-        self.latch = long_press_latch
-        
+
         # State variables
         self.phys_state = self._read()
         self.deb_state = self.phys_state

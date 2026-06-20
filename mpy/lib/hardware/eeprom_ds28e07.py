@@ -7,6 +7,7 @@
 import time
 from machine import Pin
 import onewire
+from hardware.eeprom import crc8
 
 class DS28E07:
     """DS28E07 1-Wire EEPROM driver with consolidated functionality."""
@@ -27,15 +28,6 @@ class DS28E07:
     def _log(self, msg, force=False):
         if (self.LOG or force) and self.DMESG:
             self.DMESG.log(f"EEPROM[DS28E07]: {msg}")
-
-    def _crc8(self, data):
-        """Calculate Dallas/Maxim CRC8."""
-        crc = 0
-        for byte in data:
-            crc ^= byte
-            for _ in range(8):
-                crc = (crc >> 1) ^ 0x8C if crc & 1 else crc >> 1
-        return crc
 
     def _cmd(self, cmd, addr=None, data=None):
         """Generic command helper."""
@@ -91,7 +83,7 @@ class DS28E07:
             
             # Verify CRC
             expected = bytearray([0x0F, addr & 0xFF, 0x00]) + data
-            if self._crc8(expected) != (~crc_inv & 0xFF):
+            if crc8(expected) != (~crc_inv & 0xFF):
                 self._log("CRC verification failed")
                 return False
             

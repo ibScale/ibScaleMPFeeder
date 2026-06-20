@@ -53,7 +53,7 @@ class RS485:
             if self._uart: self._uart.deinit()
             if self._de_pin:
                 try: self._de_pin.deinit()
-                except: pass
+                except Exception: pass
             raise
 
     def _log(self, msg, debug=False):
@@ -62,10 +62,19 @@ class RS485:
 
     def _uart_irq_handler(self, uart):
         data = uart.read()
-        if data: micropython.schedule(self._process_incoming_data, data)
+        if data:
+            # schedule() raises in interrupt context if its queue is full; drop rather
+            # than throw out of the ISR (next RXIDLE will resync on packet boundaries).
+            try:
+                micropython.schedule(self._process_incoming_data, data)
+            except RuntimeError:
+                pass
 
     @micropython.native
     def _process_incoming_data(self, data):
+        # NOTE: each RXIDLE chunk is validated as one complete packet; a frame split
+        # across two idle gaps is dropped (no reassembly). RXIDLE framing makes this
+        # safe for well-formed Photon traffic, which sends whole packets per burst.
         validated_data = packetizer.validate_packet(data, self._slot_id, self._logger_func, self._log_debug)
         if not validated_data: return
 
@@ -74,9 +83,15 @@ class RS485:
         added = False
         try:
             if self._rx_count + data_len <= self._rx_buffer_size:
-                for byte in validated_data:
-                    self._rx_buffer[self._rx_head] = byte
-                    self._rx_head = (self._rx_head + 1) % self._rx_buffer_size
+                # Slice copy (C-level) instead of byte-by-byte to shrink the IRQ-off window.
+                head = self._rx_head
+                first = self._rx_buffer_size - head
+                if data_len <= first:
+                    self._rx_buffer[head:head + data_len] = validated_data
+                else:
+                    self._rx_buffer[head:] = validated_data[:first]
+                    self._rx_buffer[:data_len - first] = validated_data[first:]
+                self._rx_head = (head + data_len) % self._rx_buffer_size
                 self._rx_count += data_len
                 added = True
         finally:
@@ -113,8 +128,23 @@ class RS485:
             self._log(f"ERROR during send: {e}")
         finally:
             time.sleep_us(20)
-            self._de_pin.value(DE_PIN_RECEIVE)
-            self._uart.irq(trigger=machine.UART.IRQ_RXIDLE, handler=self._uart_irq_handler)
+            # Guard against a concurrent deinit() having torn down the hardware.
+            if self._de_pin:
+                self._de_pin.value(DE_PIN_RECEIVE)
+            if self._uart:
+                self._uart.irq(trigger=machine.UART.IRQ_RXIDLE, handler=self._uart_irq_handler)
+
+    @property
+    def slot_id(self):
+        return self._slot_id
+
+    def set_slot_id(self, slot_id):
+        """Update our node address so the RX validator filters on the new slot
+        (used when PROGRAM_FEEDER_FLOOR reprograms the feeder's floor address)."""
+        if not (0 <= slot_id <= 254):
+            raise ValueError("Slot ID must be between 0 and 254.")
+        self._slot_id = slot_id
+        self._log(f"Slot ID set to {slot_id}")
 
     def send_packet(self, packet):
         if not packet or not isinstance(packet, (bytes, bytearray)):
@@ -153,16 +183,16 @@ class RS485:
             expected_len = self._get_next_packet_length()
             
             if expected_len > 0 and self._rx_count >= expected_len:
-                result = bytearray(expected_len)
+                # Slice copy (C-level) instead of byte-by-byte to shrink the IRQ-off window.
                 tail = self._rx_tail
-                for i in range(expected_len):
-                    result[i] = self._rx_buffer[tail]
-                    tail = (tail + 1) % self._rx_buffer_size
-                
-                self._rx_tail = tail
+                first = self._rx_buffer_size - tail
+                if expected_len <= first:
+                    raw_packet = bytes(self._rx_buffer[tail:tail + expected_len])
+                else:
+                    raw_packet = bytes(self._rx_buffer[tail:]) + bytes(self._rx_buffer[:expected_len - first])
+                self._rx_tail = (tail + expected_len) % self._rx_buffer_size
                 self._rx_count -= expected_len
-                raw_packet = bytes(result)
-                
+
             elif expected_len == 0 and self._rx_count >= packetizer.MIN_HEADER_LEN:
                 self._rx_tail = (self._rx_tail + 1) % self._rx_buffer_size
                 self._rx_count -= 1
@@ -202,6 +232,6 @@ class RS485:
             try:
                 self._de_pin.value(DE_PIN_RECEIVE)
                 self._de_pin.deinit()
-            except: pass
+            except Exception: pass
             self._de_pin = None
         self.clear_rx_buffer()

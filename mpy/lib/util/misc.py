@@ -7,7 +7,6 @@
 from os import statvfs
 from machine import unique_id
 from ubinascii import hexlify
-import time
 import asyncio
 
 def _check_app_passthrough(app_passthrough):
@@ -101,8 +100,8 @@ def vfs_info(mount='/flash'):
         size = round((num_blocks * block_size) / (1024 * 1024), 2)
         free = round((free_blocks * block_size) / (1024 * 1024), 2)
         return num_blocks, free_blocks, block_size, size, free
-    except Exception as e:
-        return None, e, None
+    except Exception:
+        return None, None, None, None, None
 
 def get_uuid():
     """Returns a 12-Byte Hex UUID based on the MCU's 96-bit Unique ID."""
@@ -167,7 +166,7 @@ def mem_usage():
                 else:
                     # Final fallback: estimate based on heap + typical overhead
                     mcu_total_ram = heap_total + (40 * 1024)  # Assume 40KB system overhead
-            except:
+            except Exception:
                 mcu_total_ram = heap_total + (40 * 1024)
         
         # Calculate values:

@@ -79,8 +79,7 @@ class HBridge:
 
     def _set_motor_pwm(self, pwm1, pwm2, pwm_min, speed, forward):
         """Set PWM for motor with relative speed mapping."""
-        if not 0 <= speed <= 100:
-            raise ValueError("Speed must be 0-100")
+        speed = 0 if speed < 0 else (100 if speed > 100 else speed)
         
         # Map relative speed to actual PWM range
         if pwm_min >= 100:
@@ -103,12 +102,14 @@ class HBridge:
         if not self.enabled:
             return
         
-        if not -100 <= speed <= 100:
-            raise ValueError("Speed must be -100 to 100")
+        # Clamp rather than raise: a stray value must never throw inside the control loop.
+        speed = -100 if speed < -100 else (100 if speed > 100 else speed)
         
         brake = self.auto_brake if brake is None else brake
         
         if speed == 0:
+            # Both half-bridges high = active brake (short the motor windings). Assumes a
+            # driver that reads both-inputs-high as brake, not shoot-through.
             if brake:
                 self.peel1_pwm.pulse_width_percent(100)
                 self.peel2_pwm.pulse_width_percent(100)
@@ -131,12 +132,14 @@ class HBridge:
         if not self.enabled:
             return
         
-        if not -100 <= speed <= 100:
-            raise ValueError("Speed must be -100 to 100")
+        # Clamp rather than raise: a stray value must never throw inside the control loop.
+        speed = -100 if speed < -100 else (100 if speed > 100 else speed)
         
         brake = self.auto_brake if brake is None else brake
         
         if speed == 0:
+            # Both half-bridges high = active brake (short the motor windings). Assumes a
+            # driver that reads both-inputs-high as brake, not shoot-through.
             if brake:
                 self.drive1_pwm.pulse_width_percent(100)
                 self.drive2_pwm.pulse_width_percent(100)
@@ -153,45 +156,6 @@ class HBridge:
                 self.drive2_pwm.pulse_width_percent(pwm_val)
         else:
             self._set_motor_pwm(self.drive1_pwm, self.drive2_pwm, self.drive_pwm_min, abs(speed), speed > 0)
-
-    def _motor_status(self, pwm1, pwm2):
-        """Get motor status from PWM channels."""
-        try:
-            p1, p2 = pwm1.pulse_width_percent(), pwm2.pulse_width_percent()
-            if p1 > 0 and p2 == 0: return "Forward"
-            elif p1 == 0 and p2 > 0: return "Reverse"
-            elif p1 == 0 and p2 == 0: return "Stop"
-            elif p1 >= 99.8 and p2 >= 99.8: return "Brake"
-            else: return "Unknown"
-        except: return "Error"
-
-    def _motor_speed(self, pwm1, pwm2, pwm_min):
-        """Get relative motor speed from PWM channels."""
-        status = self._motor_status(pwm1, pwm2)
-        if status not in ["Forward", "Reverse"]: return 0
-        
-        try:
-            actual_pwm = pwm1.pulse_width_percent() if status == "Forward" else pwm2.pulse_width_percent()
-            if actual_pwm < pwm_min or pwm_min >= 100: return 0
-            
-            usable_range = 100 - pwm_min
-            if usable_range <= 0: return 0
-            
-            relative_speed = int(round(100.0 * (actual_pwm - pwm_min) / usable_range))
-            return relative_speed if status == "Forward" else -relative_speed
-        except: return 0
-
-    @property
-    def peel_status(self): return self._motor_status(self.peel1_pwm, self.peel2_pwm)
-    
-    @property
-    def peel_get(self): return self._motor_speed(self.peel1_pwm, self.peel2_pwm, self.peel_pwm_min)
-    
-    @property
-    def drive_status(self): return self._motor_status(self.drive1_pwm, self.drive2_pwm)
-    
-    @property
-    def drive_get(self): return self._motor_speed(self.drive1_pwm, self.drive2_pwm, self.drive_pwm_min)
 
     def deinit(self):
         """Deinitialize timer and pins."""

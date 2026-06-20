@@ -50,17 +50,8 @@ class AT21CS01:
             self.ow.writebyte(0x33)  # READ_ROM
             rom = bytes(self.ow.readbyte() for _ in range(8))
             return rom
-        except:
+        except Exception:
             return None
-
-    def _crc8(self, data):
-        """Calculate Dallas/Maxim CRC8."""
-        crc = 0
-        for byte in data:
-            crc ^= byte
-            for _ in range(8):
-                crc = (crc >> 1) ^ 0x8C if crc & 1 else crc >> 1
-        return crc
 
     def read_memory(self, addr, length):
         """Read from AT21CS01 EEPROM memory (0x00-0x7F user area)."""

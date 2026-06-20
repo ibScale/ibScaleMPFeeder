@@ -31,6 +31,8 @@ fp-info-cache
 # Exported BOM files
 *.xml
 *.csv
+# ...but the MicroPython board pin map is a required source file, not a BOM export.
+!mpy/pins.csv
 
 # ---> VisualStudioCode
 .vscode/*

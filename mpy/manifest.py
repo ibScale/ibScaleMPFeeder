@@ -22,9 +22,18 @@ require("time")
 require("os-path")
 require("aiorepl")
 
+# Appliance entry scripts - frozen so the flashed image is self-contained and boots
+# with nothing on the filesystem.
+# boot.py sets USB to VCP-only; MSC is re-enabled at runtime when dropping to the REPL.
+# main.py runs frozen-first (a /flash copy is ignored).
+# a /flash/app.py copy still shadows the frozen app.py for dev overrides.
+freeze("$(BOARD_DIR)/flash", script="boot.py")
+freeze("$(BOARD_DIR)/flash", script="main.py")
+freeze("$(BOARD_DIR)/flash", script="app.py")
+
 # Application stuff
 freeze("$(BOARD_DIR)/lib", script="application/packetizer.py")
-#freeze("$(BOARD_DIR)/lib", script="application/photon.py")
+freeze("$(BOARD_DIR)/lib", script="application/photon.py")
 
 # Everything else
 freeze("$(BOARD_DIR)/lib", script="defaults.py")
@@ -32,6 +41,8 @@ freeze("$(BOARD_DIR)/lib", script="system/dmesg.py")
 freeze("$(BOARD_DIR)/lib", script="system/sysconfig.py")
 freeze("$(BOARD_DIR)/lib", script="system/bootstrap.py")
 freeze("$(BOARD_DIR)/lib", script="system/servo.py")
+freeze("$(BOARD_DIR)/lib", script="system/console.py")
+freeze("$(BOARD_DIR)/lib", script="system/watchdog.py")
 freeze("$(BOARD_DIR)/lib", script="system/peel.py")
 freeze("$(BOARD_DIR)/lib", script="util/misc.py")
 freeze("$(BOARD_DIR)/lib", script="util/calibrate.py")

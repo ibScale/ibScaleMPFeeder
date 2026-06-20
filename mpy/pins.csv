@@ -1,0 +1,45 @@
+# ibScale MP Feeder - STM32F411CEU6 pin aliases
+# Names match mpconfigboard.h (pyb_pin_*) and lib/defaults.py pin strings.
+# Authoritative pin map: pcb/ibScaleMPFeeder-flash.ioc (STM32CubeMX).
+
+# Buttons
+BTNUP,PC13
+BTNDOWN,PA0
+
+# RGB LED (TIM1 CH1/2/3 PWM)
+LEDRED,PA8
+LEDGREEN,PA9
+LEDBLUE,PA10
+
+# Drive + peel H-bridge (TIM4 CH1-4 PWM)
+PEEL1,PB6
+PEEL2,PB7
+DRIVE1,PB8
+DRIVE2,PB9
+DRIVEENABLE,PB15
+
+# Quadrature encoder (TIM3 CH1/2)
+DRIVEENCA,PB4
+DRIVEENCB,PB5
+
+# Voltage monitors (ADC IN8/IN9)
+VMONVDC,PB0
+VMON10V,PB1
+
+# RS485 (USART2) + driver-enable
+RS485TX,PA2
+RS485RX,PA3
+RS485DE,PA1
+
+# USB OTG FS (device) - data pins; usbd_conf.c configures pin_A11/pin_A12
+USB_DM,PA11
+USB_DP,PA12
+
+# EEPROM 1-Wire (USART1 single-wire half-duplex)
+ONEWIRE,PA15
+
+# External SPI flash (SPI1) - only compiled in the SPI-flash build variant
+FLASHNSS,PA4
+FLASHSCK,PA5
+FLASHMISO,PA6
+FLASHMOSI,PA7

@@ -4,7 +4,7 @@
 
 # bootstrap.py - Initializes the hardware and environment so the application doesn't have to
 
-import os, pyb, gc
+import os, gc
 from util.misc import vfs_info, get_uuid
 
 def _log(DMESG, msg, force=False, debug_mode=False):
@@ -86,7 +86,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
             app_passthrough[btn_name] = Button(
                 pin_name=btn_cfg[pin_key], active_high=btn_cfg[high_key],
                 debounce_ms=btn_cfg['DEBOUNCE_MS'], double_click_ms=btn_cfg['DOUBLE_CLICK_MS'],
-                long_press_ms=btn_cfg['LONG_PRESS_MS'], long_press_latch=btn_cfg['LONG_PRESS_LATCH'],
+                long_press_ms=btn_cfg['LONG_PRESS_MS'],
                 SYSCONFIG=SYSCONFIG, DMESG=DMESG
             )
     except Exception as e:
@@ -134,7 +134,9 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
             peelinvert=drv_cfg['PEEL_INVERT'], driveinvert=drv_cfg['DRIVE_INVERT'], enableinvert=drv_cfg['ENABLE_INVERT'],
             timer_id=drv_cfg['TIMER_ID'], pwm_frequency=drv_cfg['PWM_FREQUENCY'],
             peel1_ch=drv_cfg['PEEL1_CH'], peel2_ch=drv_cfg['PEEL2_CH'],
-            drive1_ch=drv_cfg['DRIVE1_CH'], drive2_ch=drv_cfg['DRIVE2_CH'], autobrake=drv_cfg['AUTOBRAKE']
+            drive1_ch=drv_cfg['DRIVE1_CH'], drive2_ch=drv_cfg['DRIVE2_CH'],
+            drive_pwm_min=drv_cfg['DRIVE_PWM_MIN'], peel_pwm_min=drv_cfg['PEEL_PWM_MIN'],
+            autobrake=drv_cfg['AUTOBRAKE']
         )
         app_passthrough['DRIVES'] = DRIVES
     except Exception as e:
@@ -148,7 +150,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
         enc_cfg = SYSCONFIG.get('ENCODER')
         ENCODER = Encoder(
             timer_num=enc_cfg['TIMER'], pin_a_name=enc_cfg['PINA'], pin_b_name=enc_cfg['PINB'],
-            pin_af=enc_cfg['TIMER_AF'], ticks_per_revolution=enc_cfg['TPR'],
+            pin_af=enc_cfg['TIMER_AF'],
             max_count=enc_cfg.get('MAX', 65535), invert=enc_cfg.get('INVERT', False),
             DMESG=DMESG, LOG=debug_mode
         )
@@ -162,15 +164,23 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
         _log(DMESG, "Initializing servo...", debug_mode=debug_mode)
         from system.servo import Servo
         servo_cfg = SYSCONFIG.get('SERVO')
+        # Flatten the profile config into {name: (max_scale, accel_scale)} tuples.
+        profiles = {}
+        for _name, _p in (servo_cfg.get('PROFILES') or {}).items():
+            profiles[_name] = (_p.get('MAX_SCALE', 1.0), _p.get('ACCEL_SCALE', 1.0))
         SERVO = Servo(
             drives=DRIVES, encoder=ENCODER, dmesg=DMESG,
-            Kp=servo_cfg.get('P', 0.05), Ki=servo_cfg.get('I', 0.001), Kd=servo_cfg.get('D', 0.005),
-            pid_taper=servo_cfg.get('PID_TAPER', 30), max_output=servo_cfg.get('MAX', 100), min_output=servo_cfg.get('MIN', 5),
-            tolerance=servo_cfg.get('TOLERANCE', 5), backlash_takeup=servo_cfg.get('TAKEUP', 100),
-            ramp_ticks=servo_cfg.get('RAMP_TICKS', 200), ramp_taper_percent=servo_cfg.get('RAMP_TAPER', 30),
-            stable_updates=servo_cfg.get('UPDATES', 3), brake=servo_cfg.get('BRAKE', True),
-            peel_enable=servo_cfg.get('PEEL_ENABLE', True), peel_speed=servo_cfg.get('PEEL_SPEED', 50),
-            peel_time_ms=servo_cfg.get('PEEL_RUN_MS', 500), debug_enabled=servo_cfg.get('DEBUG', debug_mode)
+            max_output=servo_cfg.get('MAX', 80), creep_output=servo_cfg.get('CREEP', 15),
+            min_output=servo_cfg.get('MIN', 5), tolerance=servo_cfg.get('TOLERANCE', 15),
+            backlash_takeup=servo_cfg.get('TAKEUP', 200),
+            accel_ticks=servo_cfg.get('ACCEL_TICKS', 200), decel_ticks=servo_cfg.get('DECEL_TICKS', 250),
+            creep_ticks=servo_cfg.get('CREEP_TICKS', 150), stable_updates=servo_cfg.get('UPDATES', 3),
+            brake=servo_cfg.get('BRAKE', True),
+            stall_ms=servo_cfg.get('STALL_MS', 300), stall_eps=servo_cfg.get('STALL_EPS', 3),
+            move_timeout_ms=servo_cfg.get('MOVE_TIMEOUT_MS', 10000),
+            profiles=profiles, default_profile=servo_cfg.get('DEFAULT_PROFILE', 'normal'),
+            peel_enable=servo_cfg.get('PEEL_ENABLE', True), peel_speed=servo_cfg.get('PEEL_SPEED', 100),
+            peel_time_ms=servo_cfg.get('PEEL_RUN_MS', 1000), debug_enabled=servo_cfg.get('DEBUG', debug_mode)
         )
         app_passthrough['SERVO'] = SERVO
     except Exception as e:

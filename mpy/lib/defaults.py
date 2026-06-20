@@ -11,11 +11,9 @@ DEFAULT_SYSCONFIG = {
         'EEPROM_PIN': 'ONEWIRE',
         'EEPROM_DRIVER': 'DS28E07', # LumenPNP uses a Maxim DS28E07 by default
         'TICKS_010MM': 22.546, # How many ticks per 0.10mm
-        'PEEL_OVERRUN_MS': 1000, # How many ms to run peel motor whenever drive is ran
-        'FORWARD_MS': 1000, # How many ms for average forward movement
-        'BACKWARD_MS': 1500, # How many ms for average backward movement
+        'SLOT_PROFILE': 'normal', # Speed profile for this slot's parts (gentle/normal/fast)
         'APP': 'app.py', # What to launch after we're done here
-        'RUN_APP': False, # Run run_app() from app.py
+        'WATCHDOG_S': 0, # Hardware watchdog timeout in seconds; 0 = off. Once on it runs until reset (~32s max)
         'DEBUG': False # Debug levels of logging. !!! LOTS OF NOISE !!!
     },
     'APP': {
@@ -38,7 +36,6 @@ DEFAULT_SYSCONFIG = {
         'INVERT': True, # Common Cathode
         'ONCOLOR': 'green',
         'BLINK_TIMER': 2, # Used for hardware blinking
-        'TEST': False, # Perform ANSI color test
     },
     'DRIVES': {
         'DRIVE_INVERT': False, # Set if the motor is spinning in the wrong direction
@@ -64,7 +61,6 @@ DEFAULT_SYSCONFIG = {
         'PINB': 'DRIVEENCB',
         'TIMER': 3, # Hardware timer
         'TIMER_AF': 2, # And encoder alternate function
-        'TPR': 28, # Ticks per revolution per pin (A or B); Include decoding multipliers
         'MAX': 65535, # 16-bit timer is universal
         'INVERT': False, # Invert direction
     },
@@ -78,17 +74,28 @@ DEFAULT_SYSCONFIG = {
         'BUFFER_SIZE': 0, # 0 to calculate based on baud rate, for 57.6K this whould be around 2048 bytes
     },
     'SERVO': {
-        'MAX': 80, # Max drive speed; If parts get knocked around or overshoot is consistently too high, lower this
-        'MIN': 5, # Min drive speed; If the feeder stalls or skips increase this
+        'MAX': 80, # Cruise drive speed; If parts get knocked around or overshoot is consistently too high, lower this
+        'CREEP': 15, # Slow terminal approach speed; Lower = more repeatable stop, too low = stall near target
+        'MIN': 5, # Lowest drive speed that still rotates the motor (floor); Raise if the feeder stalls/skips
         'TOLERANCE': 15, # Consider the move complete if we're +- this many ticks, too small causes excessive overshoots
         'TAKEUP': 200, # Ticks to take-up for backlash when reversing
-        'RAMP_TICKS': 250, # Endpoint for trajectory ramp; Switch to PID control once within this many ticks of requested endpoint
-        'RAMP_TAPER': 20, # Percentage of MAX speed for trajectory ramp endpoint; I.E. if MAX = 80 and TAPER = 20, then the ramp will taper down to 16 at it's endpoint before switching to PID control
-        'P': 0.05, # Proportional
-        'I': 0.0055, # Integral
-        'D': 0.001, # Deviation
-        'PID_TAPER': 30, # Limit output speed at final set point
-        'UPDATES': 3, # How many update cycles to allow encoder to settle and endpoints
+        'ACCEL_TICKS': 200, # Ramp CREEP up to MAX over this distance at the start of a move (soft start)
+        'DECEL_TICKS': 250, # Ramp MAX down to CREEP over this distance before the final creep
+        'CREEP_TICKS': 150, # Hold CREEP for the final this-many ticks before braking; governs stop repeatability
+        'UPDATES': 3, # Consecutive in-tolerance samples required to confirm the stop
+        'STALL_MS': 300, # Fault if the encoder makes no progress for this long while driving (jam detection)
+        'STALL_EPS': 3, # Minimum ticks of movement counted as "progress" for stall detection
+        'MOVE_TIMEOUT_MS': 10000, # Hard per-move time cap before a timeout fault (backstop)
+        'VALIDATE_PITCHES_MM': [2, 4, 8, 12], # Tape pitches (mm) the auto-tuner validates against
+        'DEFAULT_PROFILE': 'normal', # Speed profile used when a feed doesn't request one
+        # Per-move speed profiles scale MAX and ACCEL_TICKS. The creep tail (CREEP/CREEP_TICKS)
+        # is shared, so stop accuracy is identical across profiles - only speed/gentleness change.
+        # Pick per part at the caller (gentle for light parts/shallow pockets, fast for robust ones).
+        'PROFILES': {
+            'gentle': {'MAX_SCALE': 0.5, 'ACCEL_SCALE': 2.0}, # Slow peak, soft accel
+            'normal': {'MAX_SCALE': 1.0, 'ACCEL_SCALE': 1.0},
+            'fast':   {'MAX_SCALE': 1.0, 'ACCEL_SCALE': 0.5}, # Full peak, snappy accel
+        },
         'PEEL_ENABLE': True, # Run the peel motor with the servo
         'PEEL_SPEED': 100,
         'PEEL_RUN_MS': 1000, # Minimum time for the peel motor to run to take up slack
@@ -102,6 +109,5 @@ DEFAULT_SYSCONFIG = {
         'DEBOUNCE_MS': 50,      # Debounce time in milliseconds
         'DOUBLE_CLICK_MS': 300, # Max time in ms between clicks for a double click
         'LONG_PRESS_MS': 750,   # Time in ms to hold for a long press
-        'LONG_PRESS_LATCH': True # When a long press is detected, latch until the input changes state
     }
 }

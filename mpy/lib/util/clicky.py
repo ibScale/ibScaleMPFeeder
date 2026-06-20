@@ -6,6 +6,7 @@
 
 import time
 import asyncio
+from system.watchdog import feed as wdt_feed
 
 async def run_test(app_passthrough):
     """
@@ -38,8 +39,8 @@ async def run_test(app_passthrough):
     print("- Single Click")
     print("- Double Click")
     print("- Long Press (check button config for timing)")
-    print("- Release after Long Press (if latched)")
-    print("Press Ctrl+C in the REPL to stop the test.")
+    print("- Release after Long Press")
+    print("Press Ctrl+C to stop the test.")
     print("--------------------")
 
     last_print_time = time.ticks_ms()
@@ -49,6 +50,7 @@ async def run_test(app_passthrough):
 
     while active:
         try:
+            wdt_feed()
             # Poll buttons using the extracted objects
             BTNUP.poll()
             BTNDOWN.poll()
@@ -75,7 +77,7 @@ async def run_test(app_passthrough):
         except KeyboardInterrupt:
             print("\nButton test stopped by user.")
             if DMESG: DMESG.log("CLICKY: Button test stopped by user.")
-            stopped_by_user = Trueg
+            stopped_by_user = True
             break
 
         except Exception as e:

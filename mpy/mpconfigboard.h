@@ -16,11 +16,11 @@
 #define MICROPY_HW_ENABLE_USB       (1)
 #define MICROPY_HW_ENABLE_RNG       (0)
 #define MICROPY_HW_ENABLE_TIMER     (1)
-#define MICROPY_HW_ENABLE_ENCODER   (1)
 #define MICROPY_HW_USB_FS           (1)
+#define MICROPY_HW_USB_MSC          (1) // Compiled in; suppressed at boot by boot.py (VCP only).
+                                        // Enabled at runtime when dropping to the REPL (VCP+MSC).
 #define MICROPY_HW_HAS_SWITCH       (0) // GPIO works better with more flexibility
 #define MICROPY_HW_HAS_ADC          (1)
-#define MICROPY_HW_HAS_PWM          (1)
 
 // Configure PLL for final CPU freq of 96MHz
 #define MICROPY_HW_CLK_PLLM (25)
@@ -28,26 +28,10 @@
 #define MICROPY_HW_CLK_PLLP (RCC_PLLP_DIV2)
 #define MICROPY_HW_CLK_PLLQ (4)
 
-// GPIO buttons
-#define MICROPY_HW_BTNDOWN_PIN      (pyb_pin_BTNDOWN)
-#define MICROPY_HW_BTNDOWN_PULL     (GPIO_PULLUP)
-#define MICROPY_HW_BTNDOWN_EXTI_MODE (GPIO_MODE_IT_FALLING)
-#define MICROPY_HW_BTNUP_PIN      (pyb_pin_BTNUP)
-#define MICROPY_HW_BTNUP_PULL     (GPIO_PULLUP)
-#define MICROPY_HW_BTNUP_EXTI_MODE (GPIO_MODE_IT_FALLING)
-
-// GPIO Outputs
-#define MICROPY_HW_MOTOREN_PIN       (pyb_pin_DRIVEENABLE)
-#define MICROPY_HW_MOTOREN_PULL      (GPIO_PULLUP)
-#define MICROPY_HW_MOTOREN_ON(pin)   (mp_hal_pin_low(pin))
-#define MICROPY_HW_MOTOREN_OFF(pin)  (mp_hal_pin_high(pin))
-
-// ADCs
-#define MICROPY_HW_ADC_VMONVDC    (pyb_pin_VMONVDC)
-#define MICROPY_HW_ADC_VMON10V    (pyb_pin_VMON10V)
-#define MICROPY_HW_ADC_VREF       (ADC_CHANNEL_VREFINT)
-#define MICROPY_HW_ADC_TEMP       (ADC_CHANNEL_TEMPSENSOR)
-#define MICROPY_HW_ADC_RESOLUTION (ADC_RESOLUTION_12B)
+// NOTE: the buttons, drive-enable output, ADC voltage monitors, quadrature encoder,
+// motor/peel PWM and 1-Wire EEPROM are all configured by the frozen Python drivers
+// (lib/hardware/*) using the pin names in pins.csv - not by board #defines. Only the
+// hardware that MicroPython's C side owns (LEDs via pyb.LED, UART2 for RS485) is below.
 
 // RGB LEDs, by default PWM hardware assumes common Anode, where High is ON and Low is OFF
 // For common Cathode LEDs you need to invert the output in software. For example, with
@@ -63,31 +47,6 @@
 #define MICROPY_HW_LED3_PWM       { TIM1, 3, TIM_CHANNEL_3, GPIO_AF1_TIM1 }
 #define MICROPY_HW_LED_ON(pin)    (mp_hal_pin_high(pin))
 #define MICROPY_HW_LED_OFF(pin)   (mp_hal_pin_low(pin))
-
-// Encoder pins
-#define MICROPY_HW_ENCODER_A_PIN      (pyb_pin_DRIVEENCA) // Pin A (CLK)
-#define MICROPY_HW_ENCODER_A_PULL     (GPIO_PULLUP)
-#define MICROPY_HW_ENCODER_A_EXTI_MODE (GPIO_MODE_IT_RISING_FALLING)
-#define MICROPY_HW_ENCODER_B_PIN      (pyb_pin_DRIVEENCB) // Pin B (DT)
-#define MICROPY_HW_ENCODER_B_PULL     (GPIO_PULLUP)
-#define MICROPY_HW_ENCODER_B_EXTI_MODE (GPIO_MODE_IT_RISING_FALLING)
-
-// Motor Drives at 25KHz PWM
-#define MICROPY_HW_PWM_TIM        (TIM4)
-#define MICROPY_HW_PWM_TIM_CLK_FREQ (48000000)
-#define MICROPY_HW_PWM_PRESCALER  (23)
-#define MICROPY_HW_PWM_PERIOD     (79)
-#define MICROPY_HW_PWM_PIN_CH1    (pyb_pin_PEEL1)
-#define MICROPY_HW_PWM_PIN_CH2    (pyb_pin_PEEL2)
-#define MICROPY_HW_PWM_PIN_CH3    (pyb_pin_DRIVE1)
-#define MICROPY_HW_PWM_PIN_CH4    (pyb_pin_DRIVE2)
-#define MICROPY_HW_PWM_PIN_AF_CH1 (GPIO_AF2_TIM4)
-#define MICROPY_HW_PWM_PIN_AF_CH2 (GPIO_AF2_TIM4)
-#define MICROPY_HW_PWM_PIN_AF_CH3 (GPIO_AF2_TIM4)
-#define MICROPY_HW_PWM_PIN_AF_CH4 (GPIO_AF2_TIM4)
-
-// EEProm
-#define MICROPY_HW_PIN_ONEWIRE      (pyb_pin_ONEWIRE) 
 
 // RS485
 #define MICROPY_HW_UART2_NAME   "RS485"

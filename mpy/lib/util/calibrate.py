@@ -8,6 +8,7 @@ import time
 import sys
 import select
 import math
+from system.watchdog import feed as wdt_feed
 
 def run_calibrate(app_passthrough):
     """
@@ -48,14 +49,16 @@ def run_calibrate(app_passthrough):
         print(f"{prompt_message} (Y/N - {timeout_s}s timeout): ", end='')
         poller = select.poll()
         poller.register(sys.stdin, select.POLLIN)
-        res = poller.poll(timeout_s * 1000)
-        if res:
-            user_input = sys.stdin.readline().strip().upper()
-            print(user_input) # Echo input
-            return user_input
-        else:
-            print("Timeout")
-            return None
+        # Poll in short chunks so the watchdog (if armed) gets fed during a long wait.
+        deadline = time.ticks_add(time.ticks_ms(), timeout_s * 1000)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            wdt_feed()
+            if poller.poll(200):
+                user_input = sys.stdin.readline().strip().upper()
+                print(user_input) # Echo input
+                return user_input
+        print("Timeout")
+        return None
 
     # --- Ask for Test Confirmations ---
     print("--- Calibration Selection ---")
@@ -111,6 +114,7 @@ def run_calibrate(app_passthrough):
                 # 2. Reduce PWM until movement stops
                 print("Reducing PWM until encoder movement stops...")
                 while current_pwm >= 0:
+                    wdt_feed()
                     print(f"Setting absolute PWM: {current_pwm}%")
                     DRIVES.drive_set(current_pwm, absolute_pwm=True)
                     time.sleep_ms(50) # Allow PWM to settle briefly
@@ -139,6 +143,7 @@ def run_calibrate(app_passthrough):
                     print("Increasing PWM until encoder movement restarts...")
                     current_pwm = pwm_at_stop
                     while current_pwm <= 100:
+                        wdt_feed()
                         print(f"Setting absolute PWM: {current_pwm}%")
                         DRIVES.drive_set(current_pwm, absolute_pwm=True)
                         time.sleep_ms(50) # Allow PWM to settle briefly
@@ -240,10 +245,12 @@ def run_calibrate(app_passthrough):
             DRIVES.drive_set(100, absolute_pwm=True, brake=False)
             time.sleep_ms(COAST_TEST_FULL_SPEED_DURATION_MS)
 
-            print("Commanding motor to stop (PWM 0%). Measuring coasting ticks...")
+            print("Commanding motor to coast (PWM 0%, no brake). Measuring coasting ticks...")
             ENCODER.update()
             encoder_at_stop_command = ENCODER.count
-            DRIVES.drive_set(0, absolute_pwm=True)
+            # Coast (brake=False) so we measure the natural runway; the servo's
+            # auto_brake default would otherwise brake and skew the measurement.
+            DRIVES.drive_set(0, absolute_pwm=True, brake=False)
 
             consecutive_no_movement_intervals = 0
             last_encoder_count_coasting = encoder_at_stop_command
@@ -253,6 +260,7 @@ def run_calibrate(app_passthrough):
             checks_done = 0
 
             while consecutive_no_movement_intervals < COAST_TEST_STOP_CHECK_INTERVALS and checks_done < max_coasting_checks:
+                wdt_feed()
                 time.sleep_ms(CALIBRATION_INTERVAL_MS)
                 ENCODER.update()
                 current_encoder_count_coasting = ENCODER.count
@@ -275,15 +283,20 @@ def run_calibrate(app_passthrough):
             print(f"Encoder at actual stop: {encoder_at_actual_stop}")
             print(f"Motor coasted for approximately {coasting_ticks} ticks from full speed.")
 
-            # Round up to the nearest 100
-            rounded_coasting_ticks = math.ceil(coasting_ticks / 100.0) * 100
-            print(f"Rounded coasting ticks (SERVO.RAMP): {int(rounded_coasting_ticks)}")
+            # The coasting distance from full speed is the natural deceleration runway,
+            # so it seeds the profile's MAX->CREEP ramp (DECEL_TICKS). Half of it seeds
+            # the slow creep tail (CREEP_TICKS) as a starting point; the servo auto-tuner
+            # (option 6 / profiler) then refines CREEP speed and the creep tail.
+            rounded_coasting_ticks = int(math.ceil(coasting_ticks / 100.0) * 100)
+            decel_ticks = max(100, rounded_coasting_ticks)
+            creep_ticks = max(100, int(math.ceil((rounded_coasting_ticks / 2.0) / 50.0) * 50))
+            print(f"Coasted ~{coasting_ticks} ticks -> SERVO.DECEL_TICKS={decel_ticks}, SERVO.CREEP_TICKS={creep_ticks}")
 
-            # Save to SYSCONFIG as SERVO.RAMP
-            SYSCONFIG.set('SERVO.RAMP', int(rounded_coasting_ticks))
-            config_changed = True 
+            SYSCONFIG.set('SERVO.DECEL_TICKS', decel_ticks)
+            SYSCONFIG.set('SERVO.CREEP_TICKS', creep_ticks)
+            config_changed = True
 
-            log(f"CALIBRATE: Drive coasting ticks: {coasting_ticks}, SERVO.RAMP set to: {int(rounded_coasting_ticks)}")
+            log(f"CALIBRATE: Drive coasting ticks: {coasting_ticks}, SERVO.DECEL_TICKS={decel_ticks}, SERVO.CREEP_TICKS={creep_ticks}")
             print(f"--- Drive Coasting Distance Measurement Finished ---")
 
 
@@ -361,7 +374,7 @@ def run_calibrate(app_passthrough):
                      print("Drives already disabled.")
 
             # Give feedback
-            log(f"CALIBRATE: Results - Drive/Encoder/Peel Invert: {SYSCONFIG.get('DRIVES.DRIVE_INVERT', False)}/{SYSCONFIG.get('ENCODER.INVERT', False)}/{SYSCONFIG.get('DRIVES.PEEL_INVERT', False)}, Drive PWM Min: {SYSCONFIG.get('DRIVES.DRIVE_PWM_MIN')}, Servo Ramp: {SYSCONFIG.get('SERVO.RAMP')}")
+            log(f"CALIBRATE: Results - Drive/Encoder/Peel Invert: {SYSCONFIG.get('DRIVES.DRIVE_INVERT', False)}/{SYSCONFIG.get('ENCODER.INVERT', False)}/{SYSCONFIG.get('DRIVES.PEEL_INVERT', False)}, Drive PWM Min: {SYSCONFIG.get('DRIVES.DRIVE_PWM_MIN')}, Servo Decel/Creep ticks: {SYSCONFIG.get('SERVO.DECEL_TICKS')}/{SYSCONFIG.get('SERVO.CREEP_TICKS')}")
 
             if config_changed:
                 print("Saving updated SYSCONFIG...")

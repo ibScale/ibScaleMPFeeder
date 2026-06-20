@@ -6,7 +6,7 @@
 
 import json
 import gc
-import time
+import os
 
 class SysConfig:
     """Handles loading, accessing, modifying, and saving system configuration."""
@@ -28,60 +28,73 @@ class SysConfig:
             from defaults import DEFAULT_SYSCONFIG
             local_defaults = DEFAULT_SYSCONFIG
             defaults_loaded = True
-        except (ImportError, Exception) as e:
+        except Exception as e:
             _log(f"SYSCONFIG: WARNING - Could not load defaults: {e}")
 
-        # Load file config
+        # Load file config. If the primary file is missing/corrupt, fall back to the
+        # temp file left by an interrupted save() so a brown-out mid-write self-heals.
         file_loaded = False
         file_config = None
-        try:
-            with open(self.filename, 'r') as f:
-                file_config = json.load(f)
+        for path in (self.filename, self.filename + '.tmp'):
+            try:
+                with open(path, 'r') as f:
+                    file_config = json.load(f)
                 file_loaded = True
-        except (OSError, ValueError) as e:
-            _log(f"SYSCONFIG: WARNING - '{self.filename}' not found/invalid: {e}")
-        except Exception as e:
-            _log(f"SYSCONFIG: WARNING - Error loading '{self.filename}': {e}")
+                if path != self.filename:
+                    _log(f"SYSCONFIG: Recovered config from '{path}' after interrupted save")
+                break
+            except (OSError, ValueError) as e:
+                _log(f"SYSCONFIG: WARNING - '{path}' not found/invalid: {e}")
+            except Exception as e:
+                _log(f"SYSCONFIG: WARNING - Error loading '{path}': {e}")
 
         # Determine final configuration
         if defaults_loaded and file_loaded:
-            _log(f"SYSCONFIG: Using '{self.filename}' merged with defaults")
             self.config = file_config
-            self._merge_defaults(self.config, local_defaults)
-            self.save()
+            if self._merge_defaults(self.config, local_defaults):
+                _log(f"SYSCONFIG: Updated '{self.filename}' with missing defaults")
+                self.save()
+            else:
+                _log(f"SYSCONFIG: Using '{self.filename}' (already complete)")
         elif defaults_loaded:
             _log(f"SYSCONFIG: Using defaults, saving to '{self.filename}'")
-            self.config = local_defaults.copy()
+            # Deep-copy via the merge so we never mutate the module-level DEFAULT_SYSCONFIG
+            # (a plain dict.copy() would share the nested per-subsystem dicts).
+            self.config = {}
+            self._merge_defaults(self.config, local_defaults)
             self.save()
         elif file_loaded:
             _log(f"SYSCONFIG: WARNING - Using '{self.filename}' only, no defaults")
             self.config = file_config
         else:
             _log("SYSCONFIG: CRITICAL - No config or defaults available")
-            while True:
-                time.sleep(1)
-
-    def load(self, default_config_source):
-        """Load configuration from file."""
-        try:
-            with open(self.filename, 'r') as f:
-                self._log(f"Loading {self.filename}")
-                self.config = json.load(f)
-            self._merge_defaults(self.config, default_config_source)
-        except (OSError, ValueError) as e:
-            self._log(f"'{self.filename}' not found/invalid ({e}), using defaults")
-            self.config = default_config_source.copy()
-            self.save()
+            raise RuntimeError("SysConfig: no configuration file or defaults available")
 
     def save(self):
-        """Save current configuration to file."""
+        """Save configuration atomically: write a temp file, then rename over the original.
+
+        An interrupted write (e.g. brown-out) can only damage the temp file, never the live
+        config, and __init__ recovers from the temp file if the primary is missing/corrupt.
+        """
+        tmp = self.filename + '.tmp'
         try:
-            with open(self.filename, 'w') as f:
-                json.dump(self.config, f)
+            with open(tmp, 'w') as f:
+                f.write(json.dumps(self.config))  # single write; smaller corruption window
+            # FAT rename won't overwrite an existing file, so remove the old one first.
+            # (littlefs would rename atomically without this; the extra remove is harmless.)
+            try:
+                os.remove(self.filename)
+            except OSError:
+                pass
+            os.rename(tmp, self.filename)
             self._log(f"Configuration saved to '{self.filename}'")
             gc.collect()
         except OSError as e:
             self._log(f"Error saving to '{self.filename}': {e}")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def get(self, key, default=None):
         """Get configuration value using dot-separated key."""
@@ -161,16 +174,22 @@ class SysConfig:
                 print(f"{prefix}{key}: {value_repr}")
 
     def _merge_defaults(self, target, source):
-        """Recursively merge source dict into target dict for missing keys."""
+        """Recursively merge source into target for missing keys. Returns True if target changed."""
+        changed = False
         for key, value in source.items():
             if isinstance(value, dict):
                 node = target.get(key)
                 if not isinstance(node, dict):
                     node = {}
                     target[key] = node
-                self._merge_defaults(node, value)
+                    changed = True
+                if self._merge_defaults(node, value):
+                    changed = True
             else:
-                target.setdefault(key, value)
+                if key not in target:
+                    target[key] = value
+                    changed = True
+        return changed
 
     def _log(self, message):
         """Internal logging helper."""

@@ -4,6 +4,17 @@
 
 # eeprom.py - EEPROM factory for dynamic driver loading
 
+
+def crc8(data):
+    """Dallas/Maxim 1-Wire CRC8 (poly 0x31, reflected form 0x8C). Shared by the 1-Wire drivers."""
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x8C if crc & 1 else crc >> 1
+    return crc
+
+
 class EEPROM:
     """EEPROM factory class that loads appropriate drivers based on type."""
     
@@ -73,6 +84,10 @@ class EEPROM:
     # Delegate any other method calls to the driver
     def __getattr__(self, name):
         """Delegate unknown method calls to the driver."""
+        # Guard against infinite recursion if _driver was never set (failed load):
+        # accessing self._driver would re-enter __getattr__ for '_driver' forever.
+        if name == '_driver':
+            raise AttributeError(name)
         return getattr(self._driver, name)
     
     @property

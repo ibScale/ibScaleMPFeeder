@@ -5,9 +5,17 @@
 # peel.py - Manages the peel motor when triggered
 
 import time
-import micropython
 
 class PeelMotor:
+    """Timer-based peel motor controller.
+
+    Notes:
+    - State tracks commands, not hardware: if the H-bridge is disabled, peel_set() is a
+      no-op but the state still advances. The servo enables the drives before commanding
+      the peel motor, so this stays consistent in normal use.
+    - Stopping brakes the motor (peel_set(0) brakes per drives.auto_brake, which the servo
+      sets from SERVO.BRAKE) to hold cover-tape tension.
+    """
     # States
     STATE_STOPPED, STATE_FORWARD, STATE_REVERSE = 0, 1, 2
 
@@ -17,14 +25,11 @@ class PeelMotor:
         self.dmesg, self.debug_enabled = dmesg, debug_enabled
         self._current_state = self.STATE_STOPPED
         self._target_run_time_ms = self._run_start_time_ms = self._current_actual_speed = 0
-        self._log("PeelMotor initialized.")
+        self._log("PeelMotor initialized.", force=True)
 
-    def _log(self, message):
-        if self.debug_enabled:
-            if self.dmesg and hasattr(self.dmesg, 'log'):
-                self.dmesg.log(f"PEEL_MOTOR: {message}")
-            else:
-                print(f"PEEL_MOTOR: {message}")
+    def _log(self, message, force=False):
+        if (self.debug_enabled or force) and self.dmesg:
+            self.dmesg.log(f"PEEL_MOTOR: {message}")
 
     def run(self, direction_int, time_ms=None, speed=None):
         """Commands the peel motor. direction_int: -1=REVERSE, 0=STOP, 1=FORWARD"""
@@ -109,10 +114,6 @@ class PeelMotor:
         if elapsed >= self._target_run_time_ms:
             self._log(f"Timer complete ({self._target_run_time_ms}ms) - stopping")
             self._set_state(self.STATE_STOPPED, 0)
-
-    def get_state(self):
-        """Return current state as integer (-1, 0, 1)."""
-        return {self.STATE_FORWARD: 1, self.STATE_REVERSE: -1, self.STATE_STOPPED: 0}[self._current_state]
 
     def get_state_name(self, state_value=None):
         """Return state name string."""

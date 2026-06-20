@@ -9,10 +9,7 @@
 # compatible with the stock LumenPNP Feeder body and Photon protocol.
 
 import asyncio
-import os
-import os.path
 import machine
-import pyb
 from system.dmesg import DmesgLogger
 import gc
 from system.sysconfig import SysConfig
@@ -42,51 +39,19 @@ def clicky():
     clicky_test(app_passthrough)
 
 def handle_keyboard_interrupt():
-    """Handle Ctrl+C interrupt with user choice"""
-    print("\n\nKeyboard interrupt detected!")
-    print("Options:")
-    print("1. Drop to REPL")
-    print("2. Reboot application")
-    print("3. Reset Hardware")
-    print("4. Enter DFU mode")
-    print("5. Calibration")
-    print("6. PID Profiler")
-    print("7. Button test")
-    
-    while True:
-        try:
-            choice = input("Enter choice (1/2/3/4/5/6/7): ").strip()
-            if choice == '1':
-                print("Dropping to REPL...")
-                return
-            elif choice == '2':
-                print("Rebooting application...")
-                machine.soft_reset()
-                return
-            elif choice == '3':
-                print("Reseting hardware...")
-                machine.reset()
-                return
-            elif choice == '4':
-                print("Entering DFU mode...")
-                machine.bootloader()
-                return
-            elif choice == '5':
-                print("Running calibration...")
-                calibrate()
-                return
-            elif choice == '6':
-                print("Running PID profiler...")
-                profiler()
-                return
-            elif choice == '7':
-                print("Running button test...")
-                clicky()
-                return
-            else:
-                print("Invalid choice. Please try again.")
-        except Exception:
-            print("Invalid input. Please try again.")
+    """Ctrl+C during boot launches the serial console - the single system menu.
+
+    During normal operation the console is entered with ESC x3 (Ctrl+C is disabled
+    there so the console owns the port); this handler only fires for an interrupt
+    while bootstrap is running or has failed.
+    """
+    try:
+        from system.console import SerialConsole
+        # Boot context: restore Ctrl+C (kbd_intr 3) on exit so the REPL is usable.
+        if asyncio.run(SerialConsole(app_passthrough, kbd_intr_resting=3).run()) == 'repl':
+            print("Dropping to REPL...")
+    except Exception as e:
+        print(f"Console unavailable ({e}); dropping to REPL.")
 
 
 ### Run Bootstrap
@@ -101,7 +66,7 @@ except Exception as e:
         try:
             app_passthrough['LED'].color('yellow')
             app_passthrough['LED'].blink('red')
-        except: pass
+        except Exception: pass
     
     # Give user immediate options
     print(f"\nBOOTSTRAP FAILED: {e}")
@@ -124,31 +89,25 @@ gc.collect()
 DMESG.log(f"GLUON: Starting application...")
 
 
-### Run the application
+### Run the application. Import it (don't gate on os.path.exists, which only sees the
+### filesystem, not frozen modules) so a frozen app.py launches in the appliance image;
+### a /flash/app.py copy still shadows the frozen one for development overrides.
 app_to_run = SYSCONFIG.get('SYSTEM.APP', 'app.py')
-if os.path.exists(app_to_run):
-    try:
-        # Dynamically import and run the main function of the application module
-        app_module = __import__(app_to_run[:-3])
-        if hasattr(app_module, 'run_app'):
-            # Call the application's run_app function directly.
-            app_module.run_app(app_passthrough)
-        else:
-             DMESG.log(f"ERROR: Application '{app_to_run}' exists but does not have a 'run_app' function.")
-             if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
-
-    except KeyboardInterrupt:
-        handle_keyboard_interrupt()
-    except ImportError:
-        DMESG.log(f"ERROR: Could not import application module '{app_to_run}' even though it exists.")
+try:
+    app_module = __import__(app_to_run[:-3])
+    if hasattr(app_module, 'run_app'):
+        app_module.run_app(app_passthrough)
+    else:
+        DMESG.log(f"ERROR: Application '{app_to_run}' has no 'run_app' function.")
         if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
-    except Exception as e:
-        DMESG.log(f"ERROR: Unhandled exception during application execution: {e}")
-        if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
-    finally:
-        DMESG.log("Application finished or failed.")
-
-else:
-    DMESG.log(f"ERROR: Application file '{app_to_run}' not found.")
+except KeyboardInterrupt:
+    handle_keyboard_interrupt()
+except ImportError as e:
+    DMESG.log(f"ERROR: Could not import application '{app_to_run}': {e}")
     if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
+except Exception as e:
+    DMESG.log(f"ERROR: Unhandled exception during application execution: {e}")
+    if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
+finally:
+    DMESG.log("Application finished or failed.")
 
