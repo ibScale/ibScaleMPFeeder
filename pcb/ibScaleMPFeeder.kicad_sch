@@ -12,6 +12,7 @@
 		(comment 1 "ebae587e9a")
 		(comment 2 "Based on Opulo LumenPNP Rev 12 Feeder mobo")
 		(comment 3 "All 3.3V MLCC ≥16V ±10% ≥X5R; All 10V MLCC ≥25V; All resistors 1% ≥0.1w")
+		(comment 4 "PCB designed around 7628 prepreg 4-layer")
 	)
 	(lib_symbols
 		(symbol "Connector:TC2030"
