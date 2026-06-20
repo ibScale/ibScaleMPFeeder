@@ -256,7 +256,7 @@ README.md
 
 ## Support
 
-For support and more information, visit: <https://ibscale.com>
+For support and more information, visit: <https://www.ibscale.com>
 
 For information on the LumenPNP and its feeders, visit: <https://www.opulo.io/>
 
