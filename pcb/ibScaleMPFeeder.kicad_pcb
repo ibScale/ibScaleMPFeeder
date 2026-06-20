@@ -23722,7 +23722,7 @@
 		)
 		(property "Value" "10V"
 			(at 0 1.65 90)
-			(layer "F.Fab")
+			(layer "F.SilkS")
 			(uuid "42ed6262-684a-471a-a2ee-4f356bfda460")
 			(effects
 				(font
