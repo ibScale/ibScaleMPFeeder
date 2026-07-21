@@ -24401,7 +24401,7 @@
 				)
 			)
 		)
-		(property "Value" "100r"
+		(property "Value" "120r"
 			(at 0 1.43 0)
 			(layer "F.Fab")
 			(uuid "07959f2c-4b2e-4853-93ea-c6d41a6d8ae7")
@@ -24436,7 +24436,7 @@
 				)
 			)
 		)
-		(property "Manufacturer_Name" "TDK"
+		(property "Manufacturer_Name" "Eaton"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -24501,7 +24501,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C501996"
+		(property "LCSC" "C14709"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -24514,7 +24514,7 @@
 				)
 			)
 		)
-		(property "Mouser" "810-MPZ1608Y101BTA00"
+		(property "Mouser" "704-MFBM1V1608-121-R"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -24527,7 +24527,7 @@
 				)
 			)
 		)
-		(property "Manufacturer_Part" "MPZ1608Y101BTA00"
+		(property "Manufacturer_Part" "MFBM1V1608-121-R"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -24540,7 +24540,7 @@
 				)
 			)
 		)
-		(property "DigiKey" "445-MPZ1608Y101BTA00CT-ND"
+		(property "DigiKey" "283-MFBM1V1608-121-RCT-ND"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")

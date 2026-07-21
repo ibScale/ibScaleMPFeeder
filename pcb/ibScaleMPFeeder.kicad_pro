@@ -1003,7 +1003,7 @@
       "include_excluded_from_bom": false,
       "name": "",
       "sort_asc": true,
-      "sort_field": "Reference"
+      "sort_field": "Rating"
     },
     "bus_aliases": {},
     "connection_grid_size": 50.0,
@@ -1100,7 +1100,7 @@
         "uuid": "347227a4-c111-4502-b3dd-e4a4bce3fd36"
       }
     ],
-    "used_designators": "",
+    "used_designators": "TP9,#PWR34",
     "variants": []
   },
   "sheets": [

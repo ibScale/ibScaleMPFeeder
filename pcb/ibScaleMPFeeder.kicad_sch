@@ -9662,20 +9662,18 @@
 					)
 				)
 			)
-			(symbol "AP2213_0_1"
+			(symbol "AP2213_1_1"
 				(rectangle
 					(start -6.35 3.81)
 					(end 6.35 -6.35)
 					(stroke
 						(width 0)
-						(type default)
+						(type solid)
 					)
 					(fill
-						(type none)
+						(type background)
 					)
 				)
-			)
-			(symbol "AP2213_1_1"
 				(pin input line
 					(at -8.89 -3.81 0)
 					(length 2.54)
@@ -31202,7 +31200,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "100r"
+		(property "Value" "120r"
 			(at 346.71 139.6999 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -31246,7 +31244,7 @@
 				)
 			)
 		)
-		(property "Manufacturer_Name" "TDK"
+		(property "Manufacturer_Name" "Eaton"
 			(at 345.44 138.43 0)
 			(hide yes)
 			(show_name no)
@@ -31301,7 +31299,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C501996"
+		(property "LCSC" "C14709"
 			(at 345.44 138.43 0)
 			(hide yes)
 			(show_name no)
@@ -31312,7 +31310,7 @@
 				)
 			)
 		)
-		(property "Mouser" "810-MPZ1608Y101BTA00"
+		(property "Mouser" "704-MFBM1V1608-121-R"
 			(at 345.44 138.43 0)
 			(hide yes)
 			(show_name no)
@@ -31323,7 +31321,7 @@
 				)
 			)
 		)
-		(property "Manufacturer_Part" "MPZ1608Y101BTA00"
+		(property "Manufacturer_Part" "MFBM1V1608-121-R"
 			(at 345.44 138.43 0)
 			(hide yes)
 			(show_name no)
@@ -31334,7 +31332,7 @@
 				)
 			)
 		)
-		(property "DigiKey" "445-MPZ1608Y101BTA00CT-ND"
+		(property "DigiKey" "283-MFBM1V1608-121-RCT-ND"
 			(at 345.44 138.43 0)
 			(hide yes)
 			(show_name no)
