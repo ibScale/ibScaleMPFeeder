@@ -92,15 +92,23 @@
           ""
         ],
         [
+          "solder_mask_bridge|119752824|112181927|cca9ba89-08bd-4083-9329-66b4ac7ac1da|01403b98-f0be-49e0-896e-b063272f55cf",
+          ""
+        ],
+        [
+          "solder_mask_bridge|144118071|27352823|b4f3e58b-5acb-4d80-a09f-10b859909e9a|01403b98-f0be-49e0-896e-b063272f55cf",
+          ""
+        ],
+        [
+          "solder_mask_bridge|97902824|68181927|8b86532c-fc78-496c-a7d7-ab5fc8d2a555|01403b98-f0be-49e0-896e-b063272f55cf",
+          ""
+        ],
+        [
           "starved_thermal|121896754|69616005|01403b98-f0be-49e0-896e-b063272f55cf|afe89f4e-9f50-4a7b-896f-0509d0c438e7|F.Cu",
           ""
         ],
         [
           "starved_thermal|121896754|74716005|01403b98-f0be-49e0-896e-b063272f55cf|3d9506d1-a38a-426a-a788-f9cb1de577a1|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|123849300|79705200|01403b98-f0be-49e0-896e-b063272f55cf|723276e0-4b2c-4fa3-9ca9-8626bd98fbb5|F.Cu",
           ""
         ],
         [
@@ -112,27 +120,7 @@
           ""
         ],
         [
-          "starved_thermal|129794000|69191800|01403b98-f0be-49e0-896e-b063272f55cf|5b8f9a6f-3f0a-4b25-8635-81e84ba6860e|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|131267200|68784300|01403b98-f0be-49e0-896e-b063272f55cf|d53acd0f-4d00-4e2f-8878-970c2c93a7c7|F.Cu",
-          ""
-        ],
-        [
-          "unconnected_items|120792600|105482400|F.Cu|4|5ca0b8a9-c714-4b7b-86c6-6379bfef5957|2ad49ed7-75cf-4fa3-bc85-acf2e9246dbb",
-          ""
-        ],
-        [
-          "unconnected_items|120850000|101975000|F.Cu|4|d8a80147-98d1-43f6-adf4-9fac192b16ad|c4cd63da-621c-4846-b1e1-81317d73c29d",
-          ""
-        ],
-        [
-          "unconnected_items|134530635|110730635|F.Cu|4|cec68ede-bff3-4c8e-8598-2949ce5162f6|b5a725bc-57ad-4bab-91fd-d85b04a741de",
-          ""
-        ],
-        [
-          "unconnected_items|138375647|106867247|F.Cu|4|2b19980d-1b26-4f05-91f2-0f02f546820d|02262c26-b507-4bc9-89e4-52696c2c131d",
+          "starved_thermal|126996754|74716005|01403b98-f0be-49e0-896e-b063272f55cf|0f41f1f2-beb7-454b-b664-5fabbad11a61|In2.Cu",
           ""
         ]
       ],
@@ -340,7 +328,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": "0.0.4"
+      "sch_revision": "0.0.5"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -1003,7 +991,7 @@
       "include_excluded_from_bom": false,
       "name": "",
       "sort_asc": true,
-      "sort_field": "Rating"
+      "sort_field": "Footprint"
     },
     "bus_aliases": {},
     "connection_grid_size": 50.0,
@@ -1100,7 +1088,7 @@
         "uuid": "347227a4-c111-4502-b3dd-e4a4bce3fd36"
       }
     ],
-    "used_designators": "TP9,#PWR34",
+    "used_designators": "D12,U9,TP9,#PWR34",
     "variants": []
   },
   "sheets": [
