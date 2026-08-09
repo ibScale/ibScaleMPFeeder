@@ -385,7 +385,16 @@ def run_app(app_globals):
                 # loop's own gc_collect() above AND any collect() triggered elsewhere
                 # during this same iteration (e.g. sysconfig.save() from a Photon
                 # PROGRAM_FEEDER_FLOOR command) that this loop has no other way to see.
-                if not gc_ran_recently(loop_time_ms):
+                #
+                # Likewise, a real move (button jog via service_buttons(), or a Photon
+                # MOVE_FEED command) runs as a blocking run_move() real-time burst - by
+                # design it can take hundreds of ms, far more than one loop's budget.
+                # servo_elapsed/photon_elapsed already measure exactly that segment, so
+                # if either alone exceeds the budget the overrun is fully explained by
+                # known blocking work, not a scheduling problem - don't log it either.
+                if (not gc_ran_recently(loop_time_ms)
+                        and servo_elapsed <= loop_time_ms
+                        and photon_elapsed <= loop_time_ms):
                     log_msg(f"Loop overrun: {loop_elapsed}ms (target: {loop_time_ms}ms)")
 
                 # Overrun path: still yield once so queued tasks (the stats
