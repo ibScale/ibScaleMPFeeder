@@ -30043,7 +30043,7 @@
 			(uuid "e983da69-d406-498d-89ba-477014403955")
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Inductor_SMD.3dshapes/L_TDK_VLS6045EX_VLS6045AF.step"
+		(model "${KICAD10_3DMODEL_DIR}/Inductor_SMD.3dshapes/L_Sunlord_SWPA6040S.step"
 			(offset
 				(xyz 0 0 0)
 			)
