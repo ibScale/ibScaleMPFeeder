@@ -15,12 +15,11 @@
 # what a Photon MOVE_FEED or button jog does - at the loaded tape's pitch, with the
 # peel motor running as it would in production. Sweep CREEP from fast to slow, score
 # each batch by repeatability (std), bias (|mean|), overshoot and faults, then pick
-# the slowest reliable value with no overshoot. A stall at any CREEP disqualifies that
-# speed AND every slower one tested afterward, even if a later batch looks clean - a
-# slower creep only has less momentum to work with, so it's assumed at least as
-# stall-prone rather than trusting a small sample that got lucky. If overshoot
-# persists, lengthen CREEP_TICKS. Apply to the live servo and optionally persist to
-# sysconfig.
+# the slowest reliable value with no overshoot. A stall at any CREEP ends the sweep
+# immediately - slower CREEP values are never tested, since they'd only have less
+# momentum to work with and so be at least as stall-prone; there's no point burning
+# more tape/time to prove that. If overshoot persists, lengthen CREEP_TICKS. Apply to
+# the live servo and optionally persist to sysconfig.
 #
 # Moves are strictly FORWARD - tape can't be rewound through the mechanism. feed()
 # would only ever plan a reverse if a previous overshoot pushed the actual position
@@ -150,11 +149,8 @@ def _summarize(samples):
 
 
 def _score(m):
-    """Lower is better. None if the batch had a fault, or a faster CREEP in the same
-    sweep already faulted - stalling isn't a fluke of that one speed, and slower CREEP
-    only has less momentum to work with, so it's assumed at least as stall-prone and
-    disqualified along with it rather than risking picking it off a lucky small sample."""
-    if m['fault'] > 0 or m.get('disqualified'):
+    """Lower is better. None if the batch had a fault (unusable)."""
+    if m['fault'] > 0:
         return None
     overshoot_rate = m['overshoot'] / m['n']
     # Overshoot dominates (we can't reverse to fix it); then repeatability, then bias.
@@ -340,24 +336,19 @@ async def run_performance_profiler(app_passthrough):
         # --- Sweep CREEP -------------------------------------------------
         _log(dmesg, "Sweeping CREEP (fast -> slow):")
         results = []  # (creep, metrics)
-        fault_floor_hit = False
         for creep in _creep_candidates(servo):
             servo.creep_output = creep  # set_target() re-derives its ramp from this every move
             m = _measure(servo, dmesg, distance, samples, slot_profile)
-            if fault_floor_hit:
-                # A faster CREEP already stalled this sweep - every slower one is
-                # disqualified too, even if this particular batch came back clean.
-                m['disqualified'] = True
             results.append((creep, m))
             _report_row(dmesg, f"CREEP={creep}", m)
-            if m['fault'] > 0 and not fault_floor_hit:
-                fault_floor_hit = True
-                _log(dmesg, f"CREEP={creep} stalled - disqualifying it and every slower CREEP tested from here.")
-            if m['aborted'] or m['fault'] == m['n']:
-                # The sweep runs fast -> slow, so once a candidate stalls repeatedly
-                # every slower one will only fault harder - stop wasting tape.
-                _log(dmesg, f"{_MAX_CONSEC_FAULTS} stalls in a row - CREEP floor reached, ending sweep.")
-                _log(dmesg, "(If stalls sat at a FIXED position, suspect a jam - check tape path.)")
+            if m['fault'] > 0:
+                # The sweep runs fast -> slow, so once a candidate stalls, every slower
+                # one would only fault harder (less momentum) - stop right here instead
+                # of burning more tape/time testing candidates that are already unusable.
+                _log(dmesg, f"CREEP={creep} stalled - ending sweep here (slower CREEP would only be more stall-prone).")
+                if m['aborted']:
+                    _log(dmesg, f"{_MAX_CONSEC_FAULTS} stalls in a row at this CREEP - " +
+                                "possible jam (check tape path) rather than a speed limit.")
                 break
 
         # Pick the best-scoring fault-free batch; tie-break toward the slower (lower) creep.

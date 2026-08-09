@@ -38,7 +38,7 @@ All position numbers are **encoder ticks**; with the default `SYSTEM.TICKS_010MM
 
 Candidates are scored on `std`, then bias, with a heavy overshoot penalty; ties go to the **slower** CREEP (gentler on parts). The final recommendation repeats the winning batch's numbers as `(err std=…, bias=…, overshoot=…)`, then explains itself in plain language: why that CREEP won (its score vs. the runner-up, and any candidates excluded for faults), repeatability and bias converted to µm with a note on which of the two actually matters, and the per-feed time.
 
-A stall at any `CREEP` disqualifies that speed **and every slower one tested afterward** in the same sweep, even if a later batch happens to come back clean — a slower creep only has less momentum to work with, so it's assumed at least as stall-prone rather than trusting a small sample that got lucky.
+A stall at any `CREEP` ends the sweep immediately — slower CREEP values are never tested. A slower creep only has less momentum to work with, so it's assumed at least as stall-prone; there's no point burning more tape/time to prove that.
 
 Movement is **strictly forward** throughout: tape can't be rewound through the mechanism, so the run consumes real tape. A worst-case travel estimate is logged before the sweep starts — make sure at least that much tape is loaded. When finished, the tuner reports the total tape consumed and offers to **rewind to the starting position** (a reverse move with stall detection active), which makes unloading easy when the tape is still attached to its reel.
 
