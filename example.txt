@@ -1,0 +1,218 @@
+=== ibScale MP Feeder Console ===
+UUID: 31003c00125031334c373020  Slot: 255
+
+  1) Run calibration
+  2) Run servo auto-tune
+  3) SysConfig
+  4) Show dmesg log
+  5) Status
+  P) Program Feeder Floor (Slot ID)
+  R) Drop to REPL
+  B) Reboot (soft)
+  H) Hard reset
+  F) Factory defaults (wipe /flash + reboot)
+  D) Enter DFU (firmware update)
+  0) Exit console
+feeder> B
+Rebooting...
+[023.527] APP: Application cleanup
+[023.528] Application finished or failed.
+MPY: sync filesystems
+MPY: soft reboot
+[000.000] DMESG initialized.
+[000.000] Gluon firmware Starting...
+[000.020] SYSCONFIG: Using 'sysconfig.json' (already complete)
+[000.021] Micropython: v1.29.0-preview.678.g5f2181f938 on 2026-08-09 (1.29.0-preview)
+[000.022] Platform: ibScaleMPFeeder with STM32F411CE
+[000.022] SysName: GluonPNP
+[000.024] VFS: '/flash' - BlkSize=512, Used=15/62 blks (0.01MB), Total=0.03MB, Free=0.02MB
+[000.025] UUID: 31003c00125031334c373020
+[000.031] EEPROM[DS28E07]: WARN - Pin:ONEWIRE, No presence pulse
+[000.033] EEPROM: No valid Slot ID found - Using default 255
+[000.037] BTN[BTNUP]: Init 'BTNUP' (AH=False, DB=50, DC=300, LP=750)
+[000.039] BTN[BTNDOWN]: Init 'BTNDOWN' (AH=False, DB=50, DC=300, LP=750)
+[000.043] ADC: Init - Bits:12, VDDA:3.3, VDC:VMONVDC(7.6667x)=4.50V, VSYS:VMON10V(4.0303x)=4.50V
+[000.046] LED: Init - R/G/B:LEDRED/LEDGREEN/LEDBLUE, Timer:1@1000Hz (period=19199), Invert:True
+[000.051] DRIVES: Init - Timer: 4@25000Hz, PWMMin Drive/Peel:65/65, Inv Drive/Peel/Enable:False/False/False
+[000.055] ENCODER: Init - Timer: 3, PinA:'DRIVEENCA', PinB:'DRIVEENCB', AF:2, Inv:False, MaxCount:65535
+[000.061] PEEL_MOTOR: PeelMotor initialized.
+[000.067] SERVO: Init - Max=80, Creep=15, Min=5, Kick=60@5t/100ms, Tol=15, Backlash=200, Accel/Decel/Creep ticks=200/250/150, Stall=300ms/3t, Timeout=10000ms, Profiles=['gentle', 'fast', 'normal'] default=normal, Peel=ON PostPeel=200ms
+[000.071] RS485: Init - UART=2, Baud=57600, Bits=8, Parity=None, Stop=1, DE='RS485DE', MaxChunks=16, IRQ=RXIDLE
+[000.073] BOOTSTRAP: Initialization Complete.
+[000.081] RAM: MCU=131072B, System=43008B, Available=88064B, Used=21504B (24.4%), Free=66560B
+[000.084] GLUON: Starting application...
+[000.087] APP: Application starting...
+[000.094] PHOTON: Ready - addr=255, uuid=31003c00125031334c373020
+[000.095] APP: Photon initialized - Node: 255, UUID: 31003c00125031334c373020
+[000.098] APP: Serial console ready - press ESC three times to enter
+[000.099] APP: Starting main loop
+[005.091] APP: TICK - Memory: 29072/88064 (33%); VFS: 15/62blks (24%); VDC: 4.726084, VSYS: 4.4917784, Temp: 25.16129;
+[005.093] APP: FAULT: Voltage out of range (VDC=4.726084V [20.0-28.0], VSYS=4.4917784V [9.0-11.0])
+[005.102] APP: Performance - Servo 0Â0 (0-0), Photon 0Â0 (0-0), Tick 0Â1 (0-13), Sleep 18Â1 (7-19)
+[010.097] APP: TICK - Memory: 30352/88064 (34%); VFS: 15/62blks (24%); VDC: 4.6087236, VSYS: 4.495025, Temp: 25.16129;
+[010.107] APP: Performance - Servo 0Â0 (0-6), Photon 0Â0 (0-1), Tick 0Â1 (0-14), Sleep 18Â1 (6-19)
+
+
+=== ibScale MP Feeder Console ===
+UUID: 31003c00125031334c373020  Slot: 255
+
+  1) Run calibration
+  2) Run servo auto-tune
+  3) SysConfig
+  4) Show dmesg log
+  5) Status
+  P) Program Feeder Floor (Slot ID)
+  R) Drop to REPL
+  B) Reboot (soft)
+  H) Hard reset
+  F) Factory defaults (wipe /flash + reboot)
+  D) Enter DFU (firmware update)
+  0) Exit console
+feeder> 1
+
+--- Calibration (motor will move, Ctrl+C aborts) ---
+--- Calibration Selection ---
+Run DRIVE PWM Minimum Calibration test? (Y/N - 5s timeout): Y
+Run PEEL motor direction test (75%)? (Y/N - 5s timeout): Y
+Run button test (guided click/double-click/long-press)? (Y/N - 5s timeout): Y
+Calibrate the LED (polarity + channel colors)? (Y/N - 5s timeout): Y
+--- Starting Selected Tests ---
+Enabling drives...
+--- Starting Drive PWM Minimum Calibration ---
+Interval: 500ms, PWM Step: 5
+Initial spin at 100% for 1000ms...
+Initial movement confirmed.
+Reducing PWM until encoder movement stops...
+Setting absolute PWM: 100%
+Setting absolute PWM: 95%
+Setting absolute PWM: 90%
+Setting absolute PWM: 85%
+Setting absolute PWM: 80%
+Setting absolute PWM: 75%
+Setting absolute PWM: 70%
+Setting absolute PWM: 65%
+Setting absolute PWM: 60%
+Movement stopped at or below 60% PWM.
+Increasing PWM until encoder movement restarts...
+Setting absolute PWM: 60%
+Setting absolute PWM: 65%
+Setting absolute PWM: 70%
+Movement restarted at 70% PWM.
+Found minimum drive PWM for movement: 70%
+Performing direction check...
+Encoder direction reading: 1
+Is the DRIVE motor spinning FORWARD? (Y/N - 15s timeout): Y
+User confirms physical direction is FORWARD.
+Encoder reads FORWARD (1) (correct). Ensuring ENCODER.INVERT is False.
+Stopping drive motor...
+--- Drive PWM Calibration Finished ---
+--- Starting Drive Coasting Distance Measurement ---
+Running motor at 100% for 2000ms...
+Commanding motor to coast (PWM 0%, no brake). Measuring coasting ticks...
+Coasting check: Current count 20825, Last count 20694
+Coasting check: Current count 20825, Last count 20825
+Coasting check: Current count 20825, Last count 20825
+Coasting check: Current count 20825, Last count 20825
+Encoder at stop command: 20694
+Encoder at actual stop: 20825
+Motor coasted for approximately 131 ticks from full speed.
+Coasted ~131 ticks -> SERVO.DECEL_TICKS=200, SERVO.CREEP_TICKS=100
+[041.581] CALIBRATE: Drive coasting ticks: 131, SERVO.DECEL_TICKS=200, SERVO.CREEP_TICKS=100
+--- Drive Coasting Distance Measurement Finished ---
+--- Starting Peel Motor Test (75%) ---
+Setting peel speed to 75%...
+Peel motor running at 75%...
+Is the PEEL motor spinning FORWARD? (Y/N - 15s timeout): N
+Stopping peel motor...
+Incorrect PEEL direction reported. Setting PEEL_INVERT flag to True in SYSCONFIG.
+--- Peel Motor Test Finished ---
+--- Starting Button Test ---
+Press the UP button: single click (10s timeout)...
+  UP single click: OK
+[050.534] CALIBRATE: Button UP single click: OK
+Press the UP button: double click (10s timeout)...
+  UP double click: OK
+[052.755] CALIBRATE: Button UP double click: OK
+Press the UP button: long press (10s timeout)...
+  UP long press: OK
+[055.276] CALIBRATE: Button UP long press: OK
+Press the DOWN button: single click (10s timeout)...
+  DOWN single click: OK
+[060.377] CALIBRATE: Button DOWN single click: OK
+Press the DOWN button: double click (10s timeout)...
+  DOWN double click: OK
+[062.018] CALIBRATE: Button DOWN double click: OK
+Press the DOWN button: long press (10s timeout)...
+  DOWN long press: OK
+[063.619] CALIBRATE: Button DOWN long press: OK
+--- Button Test Finished ---
+--- Starting LED Calibration ---
+LED driven to raw-zero on all channels - is it OFF? (Y/N - 5s timeout): N
+LED polarity: Common Cathode (INVERT=True)
+Channel 0 is lit - is it RED, GREEN, or BLUE? (RED/GREEN/BLUE - 15s timeout): RED
+Channel 1 is lit - is it RED, GREEN, or BLUE? (GREEN/BLUE - 15s timeout): GREEN
+Channel 2 is lit - deduced as BLUE (the only color left).
+LED channel map (0=RED_CH pin, 1=GREEN_CH pin, 2=BLUE_CH pin): ['R', 'G', 'B']
+LED wiring calibration complete - cycling through colors (500ms/color) to confirm...
+--- LED Calibration Finished ---
+--- Final Test Cleanup ---
+Ensuring motors are stopped...
+Disabling drives...
+[089.927] CALIBRATE: Results - Drive/Encoder/Peel Invert: False/False/True, Drive PWM Min: 70, Servo Decel/Creep ticks: 200/100, LED Invert/ChannelColors: True/['R', 'G', 'B']
+Saving updated SYSCONFIG...
+SYSCONFIG saved.
+=== ibScale MP Feeder Console ===
+UUID: 31003c00125031334c373020  Slot: 255
+
+  1) Run calibration
+  2) Run servo auto-tune
+  3) SysConfig
+  4) Show dmesg log
+  5) Status
+  P) Program Feeder Floor (Slot ID)
+  R) Drop to REPL
+  B) Reboot (soft)
+  H) Hard reset
+  F) Factory defaults (wipe /flash + reboot)
+  D) Enter DFU (firmware update)
+  0) Exit console
+feeder> 2
+
+--- Servo auto-tune (motor will move, Ctrl+C aborts) ---
+Tape pitch in mm [4]:
+Servo tolerance in ticks [15]:
+Run peel motor during profiling? (Y/n): n
+[056.330] PROFILER: === Servo auto-tune ===
+[056.332] PROFILER: Production-path feeds: 4mm (901t) each, profile 'normal', 6 samples/step, 100ms dwell between feeds, peel OFF, tolerance 15t.
+[056.333] PROFILER: Forward-only - tape will advance up to ~60367 ticks (~268mm). Ensure enough tape is loaded.
+[056.970] PROFILER: Sweeping CREEP (fast -> slow):
+[060.241] PROFILER:   CREEP=40: err mean=-11.5 std=0.5 [-12..-11], overshoot=0/6, t=444ms
+[063.521] PROFILER:   CREEP=35: err mean=-11.7 std=0.5 [-12..-11], overshoot=0/6, t=446ms
+[067.158] PROFILER:   CREEP=30: err mean=-12.7 std=0.5 [-13..-12], overshoot=0/6, t=506ms
+[070.844] PROFILER:   CREEP=25: err mean=-12.0 std=1.4 [-13..-9], overshoot=0/6, t=514ms
+[074.779] PROFILER:   CREEP=20: err mean=-13.3 std=0.5 [-14..-13], overshoot=0/6, t=555ms
+[077.477] SERVO: FAULT: STALLED at 11061 (target 11155).
+[080.622] PROFILER:   CREEP=15: FAULTED (1/6) - unusable
+[080.623] PROFILER: CREEP=15 stalled - disqualifying it and every slower CREEP tested from here.
+[085.156] PROFILER:   CREEP=10: err mean=-14.0 std=0.0 [-14..-14], overshoot=0/6, t=655ms
+[088.039] SERVO: FAULT: STALLED at 21726 (target 21873).
+[088.483] SERVO: FAULT: STALLED at 21737 (target 22627).
+[088.944] SERVO: FAULT: STALLED at 21752 (target 22638).
+[089.046] PROFILER:   CREEP=6: FAULTED (3/5) - unusable
+[089.047] PROFILER: 3 stalls in a row - CREEP floor reached, ending sweep.
+[089.048] PROFILER: (If stalls sat at a FIXED position, suspect a jam - check tape path.)
+[089.050] PROFILER: Selected CREEP=40 (std=0.5, overshoot=0/6).
+[089.051] PROFILER: === Recommendation ===
+[089.052] PROFILER: CREEP=40, CREEP_TICKS=100 (err std=0.5, bias=-11.5, overshoot=0/6)
+[089.054] PROFILER: Why CREEP=40: best of 5 usable (score 6.3 vs 6.3 next-best CREEP=35); 3 faulted.
+[089.055] PROFILER:   Repeatability: std 0.5t (~+/-2um) - the error feeds can't correct; the deciding number.
+[089.057] PROFILER:   Bias: 11.5t (~51um) short on average - harmless, grid targeting absorbs it.
+[089.058] PROFILER:   Overshoot: 0/6 - can't be backed out (forward-only); zero required.
+[089.059] PROFILER:   Throughput: ~444ms per feed at this CREEP.
+Save to sysconfig and apply? (Y/n): y
+[092.166] PROFILER: Saved and applied.
+[092.168] PROFILER: Total tape consumed: 41231 ticks (~183mm).
+Rewind tape to the starting position? (y/N): y
+[094.471] PROFILER: Rewinding (reverse, then forward re-approach to the start point)...
+[111.649] PROFILER: Rewind: REACHED at -19491 (start was -19479).
+[111.652] PROFILER: Auto-tune finished.
