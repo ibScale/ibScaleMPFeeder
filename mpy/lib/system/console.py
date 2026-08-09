@@ -34,22 +34,21 @@ class SerialConsole:
         self.app = app_passthrough
         self.dmesg = app_passthrough.get('DMESG')
         self.sysconfig = app_passthrough.get('SYSCONFIG')
+        self.led = app_passthrough.get('LED')
         self.vcp = pyb.USB_VCP()
         self._esc_times = []
         # kbd_intr value to restore when the console exits: -1 when the app loop already
         # owns the VCP, or 3 when launched from boot so the REPL gets Ctrl+C back.
         self._resting_kbd = kbd_intr_resting
-        # Tail pointer for VCP log streaming: track how many dmesg entries have been
-        # forwarded so we emit only new ones each poll(), not the full history.
-        self._vcp_tail = self.dmesg.log_count if self.dmesg else 0
         self._last_health_ms = time.ticks_ms()
 
     # --- Entry detection (called each loop, non-blocking) -----------------
 
     def poll(self):
         """Drain pending VCP bytes; return True if ESC was seen 3x within the window.
-        Also forwards new dmesg entries and emits a periodic health line while unconnected."""
-        self._stream_dmesg()
+        Also emits a periodic health line while unconnected. dmesg entries are not
+        forwarded here: dmesg.log() already calls print(), which reaches the VCP
+        directly since dupterm is never redirected away from it on this board."""
         now = time.ticks_ms()
         if time.ticks_diff(now, self._last_health_ms) >= _HEALTH_INTERVAL_MS:
             self._stream_health()
@@ -73,7 +72,8 @@ class SerialConsole:
     def _stream_health(self):
         """Emit a one-line health summary to the VCP (called once per minute while unconnected)."""
         import gc
-        up = time.ticks_ms()
+        # Wrap-safe uptime from dmesg (raw ticks_ms() wraps every ~12 days).
+        up = self.dmesg.uptime_ms() if self.dmesg else time.ticks_ms()
         parts = [f"[{up // 1000:03d}.{up % 1000:03d}] HEALTH"]
 
         adc = self.app.get('ADC')
@@ -112,22 +112,6 @@ class SerialConsole:
 
         self.vcp.write((' '.join(parts) + "\r\n").encode())
 
-    def _stream_dmesg(self):
-        """Forward any dmesg entries logged since the last poll() to the VCP."""
-        if not self.dmesg:
-            return
-        count = self.dmesg.log_count
-        unsent = count - self._vcp_tail
-        if unsent <= 0:
-            return
-        buf = self.dmesg.buffer
-        # If the buffer rotated and evicted entries we never sent, clamp to what's left.
-        if unsent > len(buf):
-            unsent = len(buf)
-        for entry in buf[-unsent:]:
-            self.vcp.write((entry + "\r\n").encode())
-        self._vcp_tail = count
-
     # --- Low-level I/O ----------------------------------------------------
 
     def _write(self, s):
@@ -139,6 +123,8 @@ class SerialConsole:
         deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
         while time.ticks_diff(deadline, time.ticks_ms()) > 0:
             wdt_feed()  # menu can idle for minutes (> watchdog timeout); keep it fed
+            if self.led:
+                self.led.poll()  # keep the console-open blink animating while idle here
             if self.vcp.any():
                 ch = self.vcp.read(1)
                 if not ch:
@@ -284,7 +270,8 @@ class SerialConsole:
 
     def _show_status(self):
         from util.misc import mem_usage
-        up = time.ticks_ms()
+        # Wrap-safe uptime from dmesg (raw ticks_ms() wraps every ~12 days).
+        up = self.dmesg.uptime_ms() if self.dmesg else time.ticks_ms()
         self._write("\r\n--- Status ---\r\n")
         self._write(f"Uptime: {up // 1000}.{up % 1000:03d}s\r\n")
         mcu, avail, used, free = mem_usage()
@@ -299,7 +286,7 @@ class SerialConsole:
         servo = self.app.get('SERVO')
         if servo:
             try:
-                self._write(f"Servo: pos={servo.get_current_position()} cmd={servo.commanded_position} "
+                self._write(f"Servo: pos={servo.get_current_position()} cmd={servo.commanded_position} " +
                             f"last={servo.result_name} profile={servo.active_profile}\r\n")
             except Exception as e:
                 self._write(f"Servo status error: {e}\r\n")
@@ -427,7 +414,7 @@ class SerialConsole:
         """Wipe everything on the filesystem (config, logs, overrides) and reset so the
         device boots from frozen defaults. The EEPROM-stored slot address is untouched."""
         self._write("\r\n*** FACTORY RESET ***\r\n")
-        self._write(f"This erases ALL files on {root} (config, logs, dev overrides) and reboots\r\n"
+        self._write(f"This erases ALL files on {root} (config, logs, dev overrides) and reboots\r\n" +
                     "to firmware defaults. The programmed slot address (EEPROM) is kept.\r\n")
         self._write("Type RESET to confirm (anything else cancels)\r\nconfirm> ")
         line = await self._read_line(_INACTIVITY_MS)

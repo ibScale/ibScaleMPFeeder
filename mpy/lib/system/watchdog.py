@@ -30,7 +30,3 @@ def start(timeout_ms):
 def feed():
     if _wdt is not None:
         _wdt.feed()
-
-
-def active():
-    return _wdt is not None

@@ -17,7 +17,6 @@
 
 import time
 import micropython
-from system.peel import PeelMotor
 from system.watchdog import feed as wdt_feed
 
 # Motion states
@@ -42,12 +41,13 @@ class Servo:
 
     def __init__(self, drives, encoder, dmesg,
                  max_output=80, creep_output=15, min_output=5,
+                 kick_output=60, kick_ticks=5, kick_ms=100,
                  tolerance=15, backlash_takeup=200,
                  accel_ticks=200, decel_ticks=250, creep_ticks=150,
                  stable_updates=3, brake=True,
                  stall_ms=300, stall_eps=3, move_timeout_ms=10000,
                  profiles=None, default_profile='normal',
-                 peel_enable=False, peel_speed=75, peel_time_ms=1000,
+                 peel=None, peel_enable=False, post_peel_ms=200,
                  debug_enabled=False):
 
         # Hardware references
@@ -58,6 +58,11 @@ class Servo:
         self.max_output = abs(max_output)
         self.creep_output = abs(creep_output)
         self.min_output = abs(min_output)
+        # Breakaway kick: duty floor applied while a forward approach hasn't broken
+        # away yet (see _forward_speed). kick_output=0 or kick_ticks=0 disables.
+        self.kick_output = abs(kick_output)
+        self.kick_ticks = abs(kick_ticks)
+        self.kick_ms = abs(kick_ms)
         self.tolerance = abs(tolerance)
         self.backlash_takeup = abs(backlash_takeup)
         self.accel_ticks = abs(accel_ticks)
@@ -65,6 +70,12 @@ class Servo:
         self.creep_ticks = abs(creep_ticks)
         self.stable_updates = stable_updates
         self.debug_enabled = debug_enabled
+
+        # Cached once: creep_ticks/decel_ticks never change post-init, so precomputing
+        # their sum avoids redoing it every control tick inside the real-time move loop
+        # (_forward_speed()/_reverse_speed(), called from update() as fast as possible
+        # during run_move()).
+        self._creep_decel_ticks = self.creep_ticks + self.decel_ticks
 
         # Named speed profiles scale peak speed and accel aggression per move, as
         # (max_scale, accel_scale). The creep tail (CREEP/CREEP_TICKS) is shared, so
@@ -91,11 +102,13 @@ class Servo:
         self._backoff_point = 0
         self._move_start_pos = 0
         self._stable_count = 0
+        self._approach_ms = 0   # when the current forward approach began (kick window)
 
         # Fault tracking
         self._move_start_ms = 0
         self._progress_pos = 0
         self._progress_ms = 0
+        self._timeout_ms = move_timeout_ms  # per-move; set_target may override
 
         # Cumulative commanded grid position (absolute). feed() targets this rather
         # than actual+distance, so each move auto-corrects the previous move's
@@ -103,27 +116,38 @@ class Servo:
         # encoder position; re-anchor with reseed() on init/fault/manual reposition.
         self._commanded_position = self.encoder.absolute_count
 
-        # PeelMotor integration
-        self.peel_motor_enabled_by_servo = peel_enable
-        self.default_peel_speed, self.default_peel_run_time_ms = peel_speed, peel_time_ms
-        self.peel_motor = PeelMotor(
-            drives=self.drives,
-            default_speed=self.default_peel_speed,
-            default_time_ms=self.default_peel_run_time_ms,
-            dmesg=self.dmesg,
-            debug_enabled=self.debug_enabled
-        )
+        # Peel motor integration (injected - the composition root constructs it, so
+        # the mechanism can be swapped without touching the servo; anything with
+        # forward()/reverse()/stop()/is_idle() works). Runtime is not timed here -
+        # Servo starts it when a move begins (_begin_approach()/set_target()) and
+        # stops it when the move actually ends (_finish()/_fault()/stop()), so it
+        # always tracks real drive runtime instead of a fixed guess. On a normal
+        # finish (_finish()), the stop is delayed by post_peel_ms so the peel motor
+        # keeps clearing tape for a bit after the drive stops moving; serviced from
+        # update() at the main loop rate, so it doesn't need to be real-time accurate.
+        self.peel_motor = peel
+        self.peel_motor_enabled_by_servo = bool(peel_enable and peel)
+        self.post_peel_ms = abs(post_peel_ms)
+        self._peel_stop_at = None
 
-        self._log(f"Init - Max={self.max_output}, Creep={self.creep_output}, Min={self.min_output}, "
-                  f"Tol={self.tolerance}, Backlash={self.backlash_takeup}, "
-                  f"Accel/Decel/Creep ticks={self.accel_ticks}/{self.decel_ticks}/{self.creep_ticks}, "
-                  f"Stall={self.stall_ms}ms/{self.stall_eps}t, Timeout={self.move_timeout_ms}ms, "
-                  f"Profiles={list(self._profiles.keys())} default={self._default_profile}, "
-                  f"Peel={'ON' if self.peel_motor_enabled_by_servo else 'OFF'}", force=True)
+        self._log(f"Init - Max={self.max_output}, Creep={self.creep_output}, Min={self.min_output}, " +
+                  f"Kick={self.kick_output}@{self.kick_ticks}t/{self.kick_ms}ms, " +
+                  f"Tol={self.tolerance}, Backlash={self.backlash_takeup}, " +
+                  f"Accel/Decel/Creep ticks={self.accel_ticks}/{self.decel_ticks}/{self.creep_ticks}, " +
+                  f"Stall={self.stall_ms}ms/{self.stall_eps}t, Timeout={self.move_timeout_ms}ms, " +
+                  f"Profiles={list(self._profiles.keys())} default={self._default_profile}, " +
+                  f"Peel={'ON' if self.peel_motor_enabled_by_servo else 'OFF'} PostPeel={self.post_peel_ms}ms", force=True)
 
     def _log(self, msg, force=False):
         if (self.debug_enabled or force) and self.dmesg:
             self.dmesg.log(f"SERVO: {msg}")
+
+    def set_creep_ticks(self, ticks):
+        """Update CREEP_TICKS and refresh the cached decel+creep span used by the
+        real-time move loop. The auto-tuner (profiler.py) sweeps this at runtime;
+        assigning self.creep_ticks directly would leave _creep_decel_ticks stale."""
+        self.creep_ticks = abs(int(ticks))
+        self._creep_decel_ticks = self.creep_ticks + self.decel_ticks
 
     # --- Enable / disable -------------------------------------------------
 
@@ -134,7 +158,8 @@ class Servo:
         else:
             self.drives.drive_set(0)
             if self.peel_motor_enabled_by_servo:
-                self.peel_motor.run(0)
+                self.peel_motor.stop()
+            self._peel_stop_at = None
             self._state = _STATE_IDLE
             self.drives.enable(False)
             self._log("Servo disabled.")
@@ -161,12 +186,21 @@ class Servo:
         am = self.max_output * max_scale
         am = 100.0 if am > 100.0 else (self.min_output if am < self.min_output else am)
         self._active_max = am
+        # Cached once per move (not per tick): the forward/reverse speed ramps subtract
+        # creep_output from active_max on every control tick, so precomputing the span
+        # here avoids repeating that subtraction in the real-time move loop.
+        self._active_span = am - self.creep_output
         aa = int(self.accel_ticks * accel_scale)
         self._active_accel = aa if aa >= 1 else 1
         self._active_profile = name
 
-    def set_target(self, target_position, profile=None):
-        """Plan and start a move to an absolute encoder position (optional speed profile)."""
+    def set_target(self, target_position, profile=None, timeout_ms=None):
+        """Plan and start a move to an absolute encoder position (optional speed profile).
+
+        timeout_ms overrides MOVE_TIMEOUT_MS for this move only; 0 disables the time
+        cap entirely (stall detection still applies) - used for open-ended moves like
+        the hold-to-feed jog, which are bounded by the button release instead.
+        """
         self.enable(True)
         self._resolve_profile(profile)
         self.encoder.update()
@@ -176,7 +210,12 @@ class Servo:
         self._result = RESULT_NONE
         self._stable_count = 0
         self._move_start_ms = time.ticks_ms()
+        self._timeout_ms = self.move_timeout_ms if timeout_ms is None else timeout_ms
         self._reset_progress(current)
+        # Cancel any pending post-peel stop from a previous move; forward()/reverse()
+        # below (re)starts the peel motor immediately, so a stale scheduled stop must
+        # not be allowed to cut it off mid-move.
+        self._peel_stop_at = None
 
         if self._target >= current:
             # Forward move: straight into the approach profile.
@@ -185,17 +224,18 @@ class Servo:
             # Reverse move: back off past the target by enough to give the forward
             # approach a full profile of runway plus the backlash takeup, then come
             # back forward. Final approach is forward in both cases.
-            self._backoff_point = self._target - (self.backlash_takeup + self.decel_ticks + self.creep_ticks)
+            self._backoff_point = self._target - (self.backlash_takeup + self._creep_decel_ticks)
             self._state = _STATE_BACKOFF
             self._move_start_pos = current
             self._log(f"Reverse to {self._target}: backoff to {self._backoff_point}, then approach.")
             if self.peel_motor_enabled_by_servo:
-                self.peel_motor.run(-1, self.default_peel_run_time_ms, self.default_peel_speed)
+                self.peel_motor.reverse()
 
     def _begin_approach(self, current):
         """Enter the forward approach toward self._target from `current`."""
         self._state = _STATE_APPROACH
         self._move_start_pos = current
+        self._approach_ms = time.ticks_ms()   # opens the breakaway-kick window
         self._reset_progress(current)
         remaining = self._target - current
         if remaining <= self.tolerance:
@@ -203,7 +243,7 @@ class Servo:
             return
         self._log(f"Approach to {self._target} (distance {remaining}).")
         if self.peel_motor_enabled_by_servo:
-            self.peel_motor.run(1, self.default_peel_run_time_ms, self.default_peel_speed)
+            self.peel_motor.forward()
 
     # --- Cumulative grid --------------------------------------------------
 
@@ -237,46 +277,60 @@ class Servo:
 
     # --- Velocity profile -------------------------------------------------
 
+    @micropython.native
     def _forward_speed(self, remaining, traveled):
         """Forward duty for a given distance remaining and distance already travelled."""
         if remaining <= self.creep_ticks:
             v = self.creep_output
-        elif remaining <= self.creep_ticks + self.decel_ticks:
+        elif remaining <= self._creep_decel_ticks:
             f = (remaining - self.creep_ticks) / self.decel_ticks  # 1.0 -> 0.0
-            v = self.creep_output + (self._active_max - self.creep_output) * f
+            v = self.creep_output + self._active_span * f
         else:
             v = self._active_max
 
         # Accel cap: ramp CREEP -> active MAX over the first accel ticks (soft start).
         if self._active_accel > 0 and traveled < self._active_accel:
-            cap = self.creep_output + (self._active_max - self.creep_output) * (traveled / self._active_accel)
+            cap = self.creep_output + self._active_span * (traveled / self._active_accel)
             if cap < v:
                 v = cap
 
+        # Breakaway kick: stiction can hold the motor at rest at the soft-start duty,
+        # and the distance-based ramp above never escalates without travel. Until the
+        # approach has actually broken away (first kick_ticks of travel), floor the
+        # duty at kick_output. Time-boxed to kick_ms per approach so a hard jam falls
+        # back to normal duty for the rest of the stall window instead of holding
+        # kick torque until the fault.
+        if traveled < self.kick_ticks and v < self.kick_output:
+            if time.ticks_diff(time.ticks_ms(), self._approach_ms) < self.kick_ms:
+                v = self.kick_output
+
         return v if v >= self.min_output else self.min_output
 
+    @micropython.native
     def _reverse_speed(self, remaining):
         """Reverse duty for the backoff phase (no accel cap; precision not required)."""
         if remaining <= self.creep_ticks:
             v = self.creep_output
-        elif remaining <= self.creep_ticks + self.decel_ticks:
+        elif remaining <= self._creep_decel_ticks:
             f = (remaining - self.creep_ticks) / self.decel_ticks
-            v = self.creep_output + (self._active_max - self.creep_output) * f
+            v = self.creep_output + self._active_span * f
         else:
             v = self._active_max
         return v if v >= self.min_output else self.min_output
 
     # --- Fault detection --------------------------------------------------
 
+    @micropython.native
     def _reset_progress(self, pos):
         now = time.ticks_ms()
         self._progress_pos = pos
         self._progress_ms = now
 
+    @micropython.native
     def _check_faults(self, pos, check_stall):
         """Return True (and latch a fault) if the move timed out or stalled."""
         now = time.ticks_ms()
-        if time.ticks_diff(now, self._move_start_ms) > self.move_timeout_ms:
+        if self._timeout_ms > 0 and time.ticks_diff(now, self._move_start_ms) > self._timeout_ms:
             self._fault(RESULT_TIMEOUT, pos)
             return True
         if check_stall:
@@ -292,6 +346,13 @@ class Servo:
 
     def _finish(self, result, pos):
         self.drives.drive_set(0)  # brake (auto_brake)
+        if self.peel_motor_enabled_by_servo:
+            if self.post_peel_ms > 0:
+                # Let the peel motor keep running a bit after the drive stops; the
+                # actual stop is serviced from update() at the main loop rate.
+                self._peel_stop_at = time.ticks_add(time.ticks_ms(), self.post_peel_ms)
+            else:
+                self.peel_motor.stop()
         self._state = _STATE_IDLE
         self._result = result
         self._log(f"Done: {_RESULT_NAMES[result]} at {pos} (target {self._target}, err {pos - self._target}).")
@@ -299,7 +360,8 @@ class Servo:
     def _fault(self, result, pos):
         self.drives.drive_set(0)
         if self.peel_motor_enabled_by_servo:
-            self.peel_motor.run(0)
+            self.peel_motor.stop()
+        self._peel_stop_at = None
         self._state = _STATE_FAULT
         self._result = result
         self._log(f"FAULT: {_RESULT_NAMES[result]} at {pos} (target {self._target}).", force=True)
@@ -308,13 +370,18 @@ class Servo:
 
     @micropython.native
     def update(self):
-        if self.peel_motor_enabled_by_servo:
-            self.peel_motor.update()
-
         if not self.enabled:
             if self.peel_motor_enabled_by_servo and not self.peel_motor.is_idle():
-                self.peel_motor.run(0)
+                self.peel_motor.stop()
+            self._peel_stop_at = None
             return False
+
+        # Service a pending post-peel stop (drive already finished; peel keeps running
+        # a bit longer to clear the tape before braking). Not time-critical - checked
+        # at the main loop rate, independent of the drive's motion state below.
+        if self._peel_stop_at is not None and time.ticks_diff(time.ticks_ms(), self._peel_stop_at) >= 0:
+            self.peel_motor.stop()
+            self._peel_stop_at = None
 
         state = self._state
         if state == _STATE_IDLE or state == _STATE_FAULT:
@@ -366,8 +433,11 @@ class Servo:
                     return False
             elif err < 0:
                 # Drifted back below the band: nudge forward again (forward-only).
+                # A fresh kick window applies - the nudge starts from rest, which is
+                # exactly where stiction bites.
                 self._state = _STATE_APPROACH
                 self._move_start_pos = pos
+                self._approach_ms = time.ticks_ms()
                 self._stable_count = 0
                 self._reset_progress(pos)
             else:
@@ -381,11 +451,11 @@ class Servo:
     def run_move(self, max_ms=None):
         """Run the active move to completion in a tight real-time loop; return the result.
 
-        Spins update() (which also services the peel motor) as fast as the interpreter
-        allows, so the control rate is far above what the jittery async loop would give -
-        sub-millisecond per update means ticks-of-travel per cycle stay well under the
-        tolerance band. Blocks for the move duration; the stall/timeout watchdog inside
-        update() guarantees termination, and max_ms is a belt-and-suspenders backstop.
+        Spins update() as fast as the interpreter allows, so the control rate is far
+        above what the jittery async loop would give - sub-millisecond per update means
+        ticks-of-travel per cycle stay well under the tolerance band. Blocks for the
+        move duration; the stall/timeout watchdog inside update() guarantees
+        termination, and max_ms is a belt-and-suspenders backstop.
 
         RS485 RX (IRQ + micropython.schedule) and the USB FIFO keep buffering during the
         burst, so no incoming packets are lost - they're just processed after the move.
@@ -406,7 +476,8 @@ class Servo:
         self._log("Stop called.")
         self.drives.drive_set(0)
         if self.peel_motor_enabled_by_servo:
-            self.peel_motor.run(0)
+            self.peel_motor.stop()
+        self._peel_stop_at = None
         self._state = _STATE_IDLE
         self._result = RESULT_NONE
 
@@ -440,6 +511,8 @@ class Servo:
 
     def peel_enable(self, enabled: bool):
         self._log(f"Peel motor usage: {enabled}")
-        self.peel_motor_enabled_by_servo = enabled
-        if not enabled and self.peel_motor:
-            self.peel_motor.run(0)
+        # Can never be enabled without an injected peel motor.
+        self.peel_motor_enabled_by_servo = bool(enabled and self.peel_motor)
+        if not self.peel_motor_enabled_by_servo and self.peel_motor:
+            self.peel_motor.stop()
+            self._peel_stop_at = None

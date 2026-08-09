@@ -9,21 +9,33 @@
 #   CREEP        - terminal approach speed; the dominant knob for stop repeatability.
 #   CREEP_TICKS  - how long the slow tail is held; longer absorbs more momentum (less overshoot).
 #
-# Strategy: oscillate the drive back and forth around a start point (bounded travel),
-# measuring the stop error of repeated FORWARD moves. Sweep CREEP from fast to slow,
-# score each batch by repeatability (std), bias (|mean|), overshoot and faults, then
-# pick the slowest reliable value with no overshoot. If overshoot persists, lengthen
+# The operator loads a REAL tape and the tuner measures the production code path
+# against it: every trial is a servo.feed() (cumulative grid targeting, this slot's
+# speed profile) run to completion with servo.run_move() (real-time burst) - exactly
+# what a Photon MOVE_FEED or button jog does - at the loaded tape's pitch, with the
+# peel motor running as it would in production. Sweep CREEP from fast to slow, score
+# each batch by repeatability (std), bias (|mean|), overshoot and faults, then pick
+# the slowest reliable value with no overshoot. If overshoot persists, lengthen
 # CREEP_TICKS. Apply to the live servo and optionally persist to sysconfig.
+#
+# Moves are strictly FORWARD - tape can't be rewound through the mechanism. feed()
+# would only ever plan a reverse if a previous overshoot pushed the actual position
+# past the next grid target; the tuner re-anchors the grid (reseed) instead when
+# that happens. The whole run consumes real tape - see the "will advance" estimate
+# logged before the sweep starts.
 
-import asyncio
 import time
+import sys
+import select
 from system.servo import RESULT_REACHED, RESULT_OVERSHOT, RESULT_STALLED, RESULT_TIMEOUT
 from system.watchdog import feed as wdt_feed
 
-# Standard EIA-481 carrier-tape pitches (mm) that real feeds use. The chosen tuning
-# is validated at each so per-package behaviour (0402->2mm, 0603/0805->4mm,
-# SOT-23->8mm, SOT-223->12mm, ...) is measured rather than assumed.
-_STANDARD_PITCHES_MM = (2, 4, 8, 12)
+_DEFAULT_PITCH_MM = 4  # most common EIA-481 pitch (0603/0805, SOT-23 singles, ...)
+_DWELL_MS = 100        # at-rest pause between feed cycles (the "pick" phase of a real
+                       # SMD cycle); servo.update() is pumped throughout, like the app
+                       # loop. Note: shorter than POST_PEEL_MS (200), so the peel stop
+                       # stays pending and the next feed simply re-drives the peel.
+_MAX_CONSEC_FAULTS = 3  # stalls/timeouts in a row that end the batch AND the sweep
 
 
 def _log(dmesg, msg):
@@ -34,19 +46,83 @@ def _log(dmesg, msg):
         print(full)
 
 
-async def _run_move(servo, target, loop_ms, max_ms):
-    """Issue a move to an absolute target and pump update() until done or timed out."""
-    servo.set_target(target)
-    start = time.ticks_ms()
-    while servo.is_busy:
+def _input(prompt):
+    """Blocking line input that keeps the watchdog fed while waiting (the IWDG can't
+    be paused, and an operator can easily out-wait it at a prompt)."""
+    print(prompt, end='')
+    poller = select.poll()
+    poller.register(sys.stdin, select.POLLIN)
+    while True:
+        wdt_feed()
+        if poller.poll(200):
+            line = sys.stdin.readline()
+            if line is None:
+                return ''
+            line = line.strip()
+            print(line)  # echo
+            return line
+
+
+def _dwell(servo, ms):
+    """Rest between feeds, pumping servo.update() at the app-loop rate exactly like
+    the production main loop does after a move: this is what services the deferred
+    post-peel stop (POST_PEEL_MS after the drive brakes), and it puts a real
+    at-rest gap between feeds like the pick phase of an SMD cycle. Without it the
+    sweep runs feeds back-to-back and the mechanism never visibly stops."""
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < ms:
         servo.update()
         wdt_feed()
-        if time.ticks_diff(time.ticks_ms(), start) > max_ms:
-            break
-        await asyncio.sleep_ms(loop_ms)
+        time.sleep_ms(20)
+
+
+def _run_feed(servo, dmesg, distance, profile, dwell_ms=_DWELL_MS):
+    """One production-path feed: grid-targeted move of `distance` ticks run as a
+    real-time burst, same as a Photon MOVE_FEED, followed by an at-rest dwell.
+    Returns a per-move sample dict (elapsed covers the move only, not the dwell).
+
+    Forward-only guard: if a previous overshoot carried the actual position to (or
+    past) the next grid target, honoring the grid would mean reversing - which would
+    pull real tape backward - so re-anchor the grid to reality and feed from here.
+    """
+    cur = servo.get_current_position()
+    if servo.commanded_position + distance <= cur + servo.tolerance:
+        servo.reseed()
+        _log(dmesg, f"  (overshoot consumed the next pitch - grid re-anchored at {cur})")
+    start = time.ticks_ms()
+    target = servo.feed(distance, profile=profile)
+    result = servo.run_move()
     elapsed = time.ticks_diff(time.ticks_ms(), start)
-    pos = servo.get_current_position()
-    return {'result': servo.result, 'error': pos - target, 'elapsed': elapsed}
+    err = servo.get_current_position() - target
+    if result == RESULT_STALLED or result == RESULT_TIMEOUT:
+        # A faulted feed leaves the commanded grid ahead of reality; re-anchor so
+        # the next trial is a clean single-pitch feed instead of an ever-growing
+        # catch-up move (mirrors what Photon does after a fault).
+        servo.reseed()
+    _dwell(servo, dwell_ms)
+    return {'result': result, 'error': err, 'elapsed': elapsed}
+
+
+def _measure(servo, dmesg, distance, samples, profile, dwell_ms=_DWELL_MS):
+    """Run `samples` production feed/stop cycles (forward-only) and summarize.
+
+    Bails out of the batch after _MAX_CONSEC_FAULTS stalls/timeouts in a row and
+    marks the metrics 'aborted' - by then the candidate is proven unusable, and
+    every remaining sample would just grind the same stall."""
+    data = []
+    consec = 0
+    for _ in range(samples):
+        s = _run_feed(servo, dmesg, distance, profile, dwell_ms)
+        data.append(s)
+        if s['result'] in (RESULT_STALLED, RESULT_TIMEOUT):
+            consec += 1
+            if consec >= _MAX_CONSEC_FAULTS:
+                break
+        else:
+            consec = 0
+    m = _summarize(data)
+    m['aborted'] = consec >= _MAX_CONSEC_FAULTS
+    return m
 
 
 def _summarize(samples):
@@ -78,17 +154,6 @@ def _score(m):
     return m['std'] + 0.5 * m['abs_mean'] + overshoot_rate * 100.0
 
 
-async def _measure(servo, start_pos, distance, samples, loop_ms, max_ms):
-    """Run `samples` forward moves of `distance`, repositioning back to start between them."""
-    data = []
-    for _ in range(samples):
-        data.append(await _run_move(servo, start_pos + distance, loop_ms, max_ms))
-        # Reposition back to start (not measured). Reverse move ends forward, so the
-        # next measured move starts from a consistent, backlash-taken-up condition.
-        await _run_move(servo, start_pos, loop_ms, max_ms)
-    return _summarize(data)
-
-
 def _creep_candidates(servo):
     """Spread of CREEP speeds from fast down to the floor, within [MIN, MAX]."""
     hi = min(int(servo.max_output * 0.5), 40)
@@ -110,40 +175,82 @@ def _report_row(dmesg, label, m):
     if m['fault']:
         _log(dmesg, f"  {label}: FAULTED ({m['fault']}/{m['n']}) - unusable")
     else:
-        _log(dmesg, f"  {label}: err mean={m['mean']:.1f} std={m['std']:.1f} "
-                    f"[{m['emin']}..{m['emax']}], overshoot={m['overshoot']}/{m['n']}, "
+        _log(dmesg, f"  {label}: err mean={m['mean']:.1f} std={m['std']:.1f} " +
+                    f"[{m['emin']}..{m['emax']}], overshoot={m['overshoot']}/{m['n']}, " +
                     f"t={m['t_mean']:.0f}ms")
 
 
-async def _validate_pitches(servo, sysconfig, dmesg, start_pos, loop_ms, max_ms, samples=4):
-    """Exercise the current tuning at the standard tape pitches and flag bad geometry.
+def _offer_rewind(servo, dmesg, start_pos, ticks_per_mm):
+    """Report total tape consumed and offer to run it back to the starting position.
 
-    The terminal stop (CREEP tail + brake) is pitch-independent, but a pitch shorter
-    than DECEL_TICKS + CREEP_TICKS never reaches cruise, so those feeds run slow.
-    The accuracy invariant is that the fixed creep tail must fit inside the pitch.
+    Tuning is done on a real tape, usually still attached to its reel - rewinding
+    what the run consumed makes unloading the feeder (or just re-tensioning the reel)
+    much easier. Measured from actual encoder travel, so it includes the probe feed,
+    every sweep sample, and any overshoot.
     """
-    ticks_per_mm = sysconfig.get('SYSTEM.TICKS_010MM', 22.546) * 10
-    geometry = servo.decel_ticks + servo.creep_ticks  # distance needed to reach cruise
-    creep_floor = servo.creep_ticks + servo.tolerance  # the stop tail that must fit
-    pitches = sysconfig.get('SERVO.VALIDATE_PITCHES_MM', _STANDARD_PITCHES_MM)
+    end_pos = servo.get_current_position()
+    total_ticks = end_pos - start_pos
+    if total_ticks <= 0:
+        return
+    _log(dmesg, f"Total tape consumed: {total_ticks} ticks (~{total_ticks / ticks_per_mm:.0f}mm).")
+    try:
+        ans = _input("Rewind tape to the starting position? (y/N): ").lower()
+    except Exception:
+        return  # headless / no stdin: leave the tape where it is
+    if ans not in ('y', 'yes'):
+        return
+    _log(dmesg, "Rewinding (reverse, then forward re-approach to the start point)...")
+    # Real reverse move: backoff runs slightly PAST the start point, then the normal
+    # forward approach lands on it. No per-move time cap (the distance can be long);
+    # stall detection stays active so a snagged tape faults instead of grinding, and
+    # run_move gets a distance-scaled backstop instead of its default ~11s one.
+    servo.set_target(start_pos, timeout_ms=0)
+    servo.run_move(max_ms=10000 + 2 * total_ticks)
+    _log(dmesg, f"Rewind: {servo.result_name} at {servo.get_current_position()} (start was {start_pos}).")
+    servo.reseed()  # position moved a long way; re-anchor the grid for the app
 
-    _log(dmesg, "Validating at standard tape pitches:")
-    for pitch_mm in pitches:
-        pitch_ticks = int(pitch_mm * ticks_per_mm)
-        if pitch_ticks <= servo.tolerance:
-            continue
-        m = await _measure(servo, start_pos, pitch_ticks, samples, loop_ms, max_ms)
-        _report_row(dmesg, f"{pitch_mm}mm ({pitch_ticks}t)", m)
-        if pitch_ticks < creep_floor:
-            _log(dmesg, f"    WARNING: creep tail ({creep_floor}t) does not fit a {pitch_mm}mm pitch "
-                        "- stop accuracy may degrade for this package.")
-        elif pitch_ticks < geometry:
-            _log(dmesg, f"    NOTE: {pitch_mm}mm < decel+creep ({geometry}t) - this feed never reaches "
-                        "full speed (slower throughput, accuracy unaffected).")
+
+def _explain_choice(dmesg, results, best_creep, best_m, ticks_per_mm):
+    """Spell out in physical units why the winning CREEP was chosen, so the operator
+    can sanity-check the tuner's judgement instead of trusting a bare score."""
+    um = 1000.0 / ticks_per_mm      # um per encoder tick
+    scored = sorted((s, c) for c, m in results if (s := _score(m)) is not None)
+    faulted = len(results) - len(scored)
+    # Keep each line short: long dmesg lines get clipped on narrow consoles.
+    why = f"Why CREEP={best_creep}: best of {len(scored)} usable"
+    if len(scored) > 1:
+        why += f" (score {scored[0][0]:.1f} vs {scored[1][0]:.1f} next-best CREEP={scored[1][1]})"
+    if faulted:
+        why += f"; {faulted} faulted"
+    _log(dmesg, why + ".")
+    _log(dmesg, f"  Repeatability: std {best_m['std']:.1f}t (~+/-{best_m['std'] * um:.0f}um) - " +
+                "the error feeds can't correct; the deciding number.")
+    side = 'short' if best_m['mean'] < 0 else 'past'
+    _log(dmesg, f"  Bias: {abs(best_m['mean']):.1f}t (~{abs(best_m['mean']) * um:.0f}um) {side} " +
+                "on average - harmless, grid targeting absorbs it.")
+    _log(dmesg, f"  Overshoot: {best_m['overshoot']}/{best_m['n']} - can't be backed out " +
+                "(forward-only); zero required.")
+    _log(dmesg, f"  Throughput: ~{best_m['t_mean']:.0f}ms per feed at this CREEP.")
+
+
+def _geometry_notes(servo, dmesg, pitch_ticks, pitch_mm):
+    """Arithmetic sanity check of the tuned geometry against the loaded pitch. The
+    terminal stop (CREEP tail + brake) is pitch-independent, so this needs no extra
+    tape-consuming moves - the accuracy invariant is simply that the fixed creep
+    tail must fit inside the pitch."""
+    creep_floor = servo.creep_ticks + servo.tolerance
+    cruise_dist = servo.decel_ticks + servo.creep_ticks  # distance needed to reach cruise
+    if pitch_ticks < creep_floor:
+        _log(dmesg, f"WARNING: creep tail ({creep_floor}t) does not fit the {pitch_mm}mm pitch " +
+                    "- stop accuracy may degrade. Consider a shorter CREEP_TICKS.")
+    elif pitch_ticks < cruise_dist:
+        _log(dmesg, f"NOTE: {pitch_mm}mm pitch < decel+creep ({cruise_dist}t) - feeds never reach " +
+                    "full speed (slower throughput, accuracy unaffected).")
 
 
 async def run_performance_profiler(app_passthrough):
-    """Entry point (kept for the recovery menu / misc.profiler_test)."""
+    """Entry point (async for the console / misc.profiler_test callers; the tuning
+    itself runs blocking real-time bursts, exactly like production feeds)."""
     if not isinstance(app_passthrough, dict):
         print("PROFILER: invalid app_passthrough")
         return
@@ -154,44 +261,74 @@ async def run_performance_profiler(app_passthrough):
         _log(dmesg, "SERVO/SYSCONFIG missing - cannot run.")
         return
 
-    loop_ms = sysconfig.get('APP.LOOP_INTERVAL_MS', 20)
-    max_ms = servo.move_timeout_ms + 1000
+    slot_profile = sysconfig.get('SYSTEM.SLOT_PROFILE', 'normal')
+    ticks_per_mm = sysconfig.get('SYSTEM.TICKS_010MM', 22.546) * 10
     samples = 6
-    # Distance long enough to exercise the full accel/cruise/decel/creep profile.
-    distance = servo.accel_ticks + servo.decel_ticks + servo.creep_ticks + max(50, servo.tolerance * 4)
+
+    # The loaded tape's pitch is the tuning distance, so every trial matches this
+    # slot's production feeds exactly.
+    try:
+        raw = _input(f"Tape pitch in mm [{_DEFAULT_PITCH_MM}]: ")
+        pitch_mm = float(raw) if raw else _DEFAULT_PITCH_MM
+    except Exception:
+        pitch_mm = _DEFAULT_PITCH_MM  # headless / no stdin
+    distance = int(pitch_mm * ticks_per_mm)
+    if distance <= servo.tolerance:
+        _log(dmesg, f"Pitch {pitch_mm}mm ({distance}t) is within TOLERANCE - nothing to tune.")
+        return
+
+    # Peel motor: default to production behavior, but let the operator turn it off
+    # (e.g. no cover film attached, or tuning a bare mechanism on the bench).
+    try:
+        raw = _input("Run peel motor during profiling? (Y/n): ").lower()
+    except Exception:
+        raw = 'y'  # headless / no stdin
+    peel_on = raw not in ('n', 'no')
 
     # Preserve originals so we can restore on decline/abort.
-    orig = {
-        'creep': servo.creep_output,
-        'creep_ticks': servo.creep_ticks,
-        'peel': servo.peel_motor_enabled_by_servo,
-    }
+    orig = {'creep': servo.creep_output, 'creep_ticks': servo.creep_ticks,
+            'peel': servo.peel_motor_enabled_by_servo}
+    servo.peel_enable(peel_on)
+
+    # Worst-case forward travel estimate (probe + CREEP sweep + CREEP_TICKS refine)
+    # so the operator knows how much tape this will consume.
+    n_creep = len(_creep_candidates(servo))
+    worst_ticks = distance * (1 + n_creep * samples + 3 * samples)
+    worst_mm = worst_ticks / ticks_per_mm
 
     _log(dmesg, "=== Servo auto-tune ===")
-    _log(dmesg, f"Bounded oscillation of ~{distance} ticks, {samples} samples/step, loop={loop_ms}ms.")
-    _log(dmesg, "Ensure the carriage can travel freely. Peel motor disabled during tuning.")
+    peel_desc = 'ON' if peel_on else 'OFF'
+    _log(dmesg, f"Production-path feeds: {pitch_mm}mm ({distance}t) each, profile '{slot_profile}', " +
+                f"{samples} samples/step, {_DWELL_MS}ms dwell between feeds, peel {peel_desc}.")
+    _log(dmesg, f"Forward-only - tape will advance up to ~{worst_ticks} ticks (~{worst_mm:.0f}mm). " +
+                "Ensure enough tape is loaded.")
 
-    servo.peel_enable(False)
     try:
         servo.enable(True)
-        start_pos = servo.get_current_position()
+        servo.reseed()  # anchor the commanded grid to the actual position, like INITIALIZE does
+        start_pos = servo.get_current_position()  # rewind point / total-travel reference
 
-        # Sanity move: confirm the drive actually moves forward.
-        probe = await _run_move(servo, start_pos + distance, loop_ms, max_ms)
-        await _run_move(servo, start_pos, loop_ms, max_ms)
+        # Sanity feed: confirm the drive actually moves forward before sweeping.
+        probe = _run_feed(servo, dmesg, distance, slot_profile)
         if probe['result'] in (RESULT_STALLED, RESULT_TIMEOUT) or abs(probe['error']) > distance:
-            _log(dmesg, f"Probe move failed (result={servo.result_name}, err={probe['error']}). "
-                        "Check power/wiring/direction. Aborting.")
+            _log(dmesg, f"Probe feed failed (result={servo.result_name}, err={probe['error']}). " +
+                        "Check power/wiring/direction/tape path. Aborting.")
             return
 
         # --- Sweep CREEP -------------------------------------------------
         _log(dmesg, "Sweeping CREEP (fast -> slow):")
         results = []  # (creep, metrics)
         for creep in _creep_candidates(servo):
-            servo.creep_output = creep
-            m = await _measure(servo, start_pos, distance, samples, loop_ms, max_ms)
+            servo.creep_output = creep  # set_target() re-derives its ramp from this every move
+            m = _measure(servo, dmesg, distance, samples, slot_profile)
             results.append((creep, m))
             _report_row(dmesg, f"CREEP={creep}", m)
+            if m['aborted'] or m['fault'] == m['n']:
+                # The sweep runs fast -> slow, so once a candidate stalls repeatedly
+                # every slower one will only fault harder - stop wasting tape.
+                _log(dmesg, f"{_MAX_CONSEC_FAULTS} stalls in a row - CREEP floor reached, ending sweep.")
+                _log(dmesg, "(If stalls sat at a FIXED position, suspect a jam - check tape path.)")
+                break
 
         # Pick the best-scoring fault-free batch; tie-break toward the slower (lower) creep.
         best = None  # (score, creep, metrics)
@@ -218,9 +355,12 @@ async def run_performance_profiler(app_passthrough):
             _log(dmesg, "Overshoot present - lengthening CREEP_TICKS:")
             for mult in (1.5, 2.0, 2.5):
                 ct = int(orig['creep_ticks'] * mult)
-                servo.creep_ticks = ct
-                m = await _measure(servo, start_pos, distance, samples, loop_ms, max_ms)
+                servo.set_creep_ticks(ct)
+                m = _measure(servo, dmesg, distance, samples, slot_profile)
                 _report_row(dmesg, f"CREEP_TICKS={ct}", m)
+                if m['aborted']:
+                    _log(dmesg, f"{_MAX_CONSEC_FAULTS} stalls in a row - stopping CREEP_TICKS refinement.")
+                    break
                 if m['fault'] == 0 and m['overshoot'] == 0:
                     best_creep_ticks = ct
                     best_m = m
@@ -228,19 +368,27 @@ async def run_performance_profiler(app_passthrough):
             else:
                 _log(dmesg, "Overshoot persists; also consider lowering MAX.")
                 best_creep_ticks = servo.creep_ticks
-            servo.creep_ticks = best_creep_ticks
+            servo.set_creep_ticks(best_creep_ticks)
+
+        # Measurements done - park the servo before the interactive prompts. The
+        # deferred post-peel stop is due POST_PEEL_MS after the last feed, but the
+        # dwell (100ms) is shorter and nothing pumps update() past this point, so
+        # without an explicit stop the peel motor would run through the prompts.
+        servo.stop()
 
         _log(dmesg, "=== Recommendation ===")
-        _log(dmesg, f"CREEP={best_creep}, CREEP_TICKS={best_creep_ticks} "
-                    f"(err std={best_m['std']:.1f}, bias={best_m['mean']:.1f}, "
+        _log(dmesg, f"CREEP={best_creep}, CREEP_TICKS={best_creep_ticks} " +
+                    f"(err std={best_m['std']:.1f}, bias={best_m['mean']:.1f}, " +
                     f"overshoot={best_m['overshoot']}/{best_m['n']})")
-
-        # --- Validate across standard tape pitches -----------------------
-        await _validate_pitches(servo, sysconfig, dmesg, start_pos, loop_ms, max_ms)
+        _explain_choice(dmesg, results, best_creep, best_m, ticks_per_mm)
+        if best_creep_ticks != orig['creep_ticks']:
+            _log(dmesg, f"  CREEP_TICKS lengthened {orig['creep_ticks']} -> {best_creep_ticks} " +
+                        "to absorb momentum and eliminate overshoot.")
+        _geometry_notes(servo, dmesg, distance, pitch_mm)
 
         # --- Persist? ----------------------------------------------------
         try:
-            ans = input("Save to sysconfig and apply? (Y/n): ").strip().lower()
+            ans = _input("Save to sysconfig and apply? (Y/n): ").lower()
         except Exception:
             ans = 'y'  # headless: persist by default
 
@@ -252,13 +400,16 @@ async def run_performance_profiler(app_passthrough):
             _log(dmesg, "Saved and applied.")
         else:
             servo.creep_output = orig['creep']
-            servo.creep_ticks = orig['creep_ticks']
+            servo.set_creep_ticks(orig['creep_ticks'])
             _log(dmesg, "Discarded; servo restored to previous values.")
+
+        # --- Unloading aid ------------------------------------------------
+        _offer_rewind(servo, dmesg, start_pos, ticks_per_mm)
 
     except Exception as e:
         _log(dmesg, f"ERROR during tuning: {e}")
         servo.creep_output = orig['creep']
-        servo.creep_ticks = orig['creep_ticks']
+        servo.set_creep_ticks(orig['creep_ticks'])
     finally:
         servo.peel_enable(orig['peel'])
         servo.disable()

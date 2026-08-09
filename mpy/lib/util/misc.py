@@ -36,7 +36,7 @@ def calibrate_test(app_passthrough):
         dmesg.log(f"REPL: Error during calibrate_test(): {e}")
 
 def profiler_test(app_passthrough):
-    """Runs the PID tuning profiler."""
+    """Runs the servo auto-tune profiler."""
     if not _check_app_passthrough(app_passthrough): 
         return
 
@@ -113,72 +113,36 @@ def mem_usage():
     """Returns MCU total RAM, available RAM, used RAM, and free RAM."""
     try:
         import gc
-        import micropython
         gc.collect()  # Force garbage collection for accurate reading
-        
+
         # Get heap memory info
         heap_used = gc.mem_alloc()
         heap_free = gc.mem_free()
         heap_total = heap_used + heap_free
-        
-        # Try to get MCU total RAM from micropython.mem_info()
-        mcu_total_ram = None
+
+        # Total MCU RAM comes from the MCU type: micropython.mem_info() prints via
+        # the C-level platform print on stm32 (not sys.stdout), so its report can't
+        # be captured programmatically.
         try:
-            import io
-            import sys
-            
-            # Capture micropython.mem_info(1) output
-            old_stdout = sys.stdout
-            captured_output = io.StringIO()
-            sys.stdout = captured_output
-            
-            micropython.mem_info(1)  # Get detailed memory info
-            
-            sys.stdout = old_stdout
-            mem_info_output = captured_output.getvalue()
-            
-            # Parse the output - look for "GC: total: 88320" format
-            for line in mem_info_output.split('\n'):
-                if line.startswith('GC: total:'):
-                    # Extract total from "GC: total: 88320, used: 49904, free: 38416"
-                    parts = line.split(',')
-                    total_part = parts[0]  # "GC: total: 88320"
-                    mcu_total_ram = int(total_part.split(':')[2].strip())
-                    break
+            import os
+            machine_info = os.uname().machine.upper()
+
+            # Map known MCU types to RAM sizes
+            if 'STM32F411' in machine_info:
+                mcu_total_ram = 128 * 1024  # 128KB
+            elif 'STM32F405' in machine_info or 'STM32F407' in machine_info:
+                mcu_total_ram = 192 * 1024  # 192KB
+            elif 'STM32F401' in machine_info:
+                mcu_total_ram = 96 * 1024   # 96KB
+            elif 'STM32F429' in machine_info:
+                mcu_total_ram = 256 * 1024  # 256KB
+            else:
+                # Final fallback: estimate based on heap + typical overhead
+                mcu_total_ram = heap_total + (40 * 1024)  # Assume 40KB system overhead
         except Exception:
-            pass
-        
-        # Fallback: try to determine from MCU type
-        if mcu_total_ram is None:
-            try:
-                import os
-                machine_info = os.uname().machine.upper()
-                
-                # Map known MCU types to RAM sizes
-                if 'STM32F411' in machine_info:
-                    mcu_total_ram = 128 * 1024  # 128KB
-                elif 'STM32F405' in machine_info or 'STM32F407' in machine_info:
-                    mcu_total_ram = 192 * 1024  # 192KB
-                elif 'STM32F401' in machine_info:
-                    mcu_total_ram = 96 * 1024   # 96KB
-                elif 'STM32F429' in machine_info:
-                    mcu_total_ram = 256 * 1024  # 256KB
-                else:
-                    # Final fallback: estimate based on heap + typical overhead
-                    mcu_total_ram = heap_total + (40 * 1024)  # Assume 40KB system overhead
-            except Exception:
-                mcu_total_ram = heap_total + (40 * 1024)
-        
-        # Calculate values:
-        # Available RAM = heap total (what's available for programs)
-        # Used RAM = heap used (how much of available RAM is used)
-        # Free RAM = heap free (how much of available RAM is free)
-        available_ram = heap_total  # This is what's available for programs
-        used_ram = heap_used        # How much of available RAM is used
-        free_ram = heap_free        # How much of available RAM is free
-        
-        # Cleanup and return
-        return mcu_total_ram, available_ram, used_ram, free_ram
-        
-    except Exception as e:
+            mcu_total_ram = heap_total + (40 * 1024)
+
+        return mcu_total_ram, heap_total, heap_used, heap_free
+
+    except Exception:
         return None, None, None, None

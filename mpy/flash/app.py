@@ -11,22 +11,27 @@ import gc
 import micropython
 from util.misc import mem_usage, vfs_info
 from system.watchdog import start as wdt_start, feed as wdt_feed
+from system.servo import RESULT_STALLED, RESULT_TIMEOUT
 
-def log_interval(app_globals):
-    """
-    Generates the interval log message and does some basic maintenance
-    """
+def log_interval(vdc, vsys, temp):
+    """Generate the heartbeat log message. The ADC values are passed in - read once
+    per tick by the main loop and shared with the fault checks there. Every source
+    can fail (all-None tuples / None readings); the heartbeat must degrade to 'n/a'
+    rather than crash, or it would mask the underlying problem with a loop error."""
     mcu_total, available, used, free = mem_usage()
-    log_message = f"TICK - Memory: {used}/{available} ({round(used/available*100)}%);"
+    if available:
+        log_message = f"TICK - Memory: {used}/{available} ({round(used/available*100)}%);"
+    else:
+        log_message = "TICK - Memory: n/a;"
+
     blocks, free_blocks, block_size, size_mb, free_mb = vfs_info('/flash')
+    if blocks:
+        used_blocks = blocks - free_blocks
+        log_message += f" VFS: {used_blocks}/{blocks}blks ({round(used_blocks/blocks*100)}%);"
+    else:
+        log_message += " VFS: n/a;"
 
-    used_blocks, used_mb = blocks - free_blocks, size_mb - free_mb
-    log_message += f" VFS: {used_blocks}/{blocks}blks ({round(used_blocks/blocks*100)}%);"
-
-    VDC = app_globals['ADC'].vmonvdc()
-    VSYS = app_globals['ADC'].vmonsys()
-    temp = app_globals['ADC'].temp()
-    log_message += f" VDC: {VDC}, VSYS: {VSYS}, Temp: {temp};"
+    log_message += f" VDC: {vdc}, VSYS: {vsys}, Temp: {temp};"
 
     return log_message
 
@@ -81,15 +86,14 @@ def format_perf_stats(perf_stats):
     tick_avg, tick_min, tick_max, tick_std = perf_stats['tick']
     sleep_avg, sleep_min, sleep_max, sleep_std = perf_stats['sleep']
     
-    return (f"Servo {servo_avg}±{servo_std} ({servo_min}-{servo_max}), "
-            f"Photon {photon_avg}±{photon_std} ({photon_min}-{photon_max}), "
-            f"Tick {tick_avg}±{tick_std} ({tick_min}-{tick_max}), "
+    return (f"Servo {servo_avg}±{servo_std} ({servo_min}-{servo_max}), " +
+            f"Photon {photon_avg}±{photon_std} ({photon_min}-{photon_max}), " +
+            f"Tick {tick_avg}±{tick_std} ({tick_min}-{tick_max}), " +
             f"Sleep {sleep_avg}±{sleep_std} ({sleep_min}-{sleep_max})")
 
 async def calculate_and_log_stats(servo_data, photon_data, tick_data, sleep_data, log_msg):
     """Background task to calculate and log performance stats"""
     try:
-        # Calculate stats using viper function
         servo_stats = calc_stats(servo_data)
         photon_stats = calc_stats(photon_data)
         tick_stats = calc_stats(tick_data)
@@ -121,9 +125,19 @@ def run_app(app_globals):
     LED = app_globals['LED']
     SERVO = app_globals['SERVO']
     NETWORK = app_globals['RS485']
+    ADC = app_globals.get('ADC')
     BTNUP = app_globals.get('BTNUP')
     BTNDOWN = app_globals.get('BTNDOWN')
     ENCODER = app_globals.get('ENCODER')
+
+    # Overtemperature threshold for the LED fault indicator (0 disables the check).
+    temp_max_c = SYSCONFIG.get('SYSTEM.TEMP_MAX_C', 70)
+
+    # Voltage-range thresholds for the LED fault indicator (rail out of spec = fault).
+    vdc_min = SYSCONFIG.get('ADC.VDC_MIN', 20.0)
+    vdc_max = SYSCONFIG.get('ADC.VDC_MAX', 28.0)
+    vsys_min = SYSCONFIG.get('ADC.VSYS_MIN', 9.0)
+    vsys_max = SYSCONFIG.get('ADC.VSYS_MAX', 11.0)
 
     # Manual jog distances derived from encoder scaling (TICKS_010MM = ticks per 0.1mm)
     ticks_per_mm = SYSCONFIG.get('SYSTEM.TICKS_010MM', 22.546) * 10
@@ -141,21 +155,23 @@ def run_app(app_globals):
     # Simple logging function
     def log_msg(message):
         DMESG.log(f"APP: {message}")
-    
+
     log_msg("Application starting...")
-    LED.color('green')
-    
-    # Photon protocol support (optional - manual jog via buttons still works without it)
+
+    # Photon protocol support (optional - manual jog via buttons still works without it).
+    # Photon.__init__ takes over LED status duty from the boot default (purple) as soon
+    # as it's constructed, setting yellow until CMD_INITIALIZE_FEEDER succeeds (green).
     PHOTON = None
     try:
         from application.photon import Photon
-        node_address = SYSCONFIG.get('SYSTEM.SLOTID', 0)
+        node_address = SYSCONFIG.get('SYSTEM.SLOTID', 255)
         uuid = SYSCONFIG.get('SYSTEM.UUID', 0)
         PHOTON = Photon(NETWORK, DMESG, SERVO, LED, SYSCONFIG,
                         eeprom=app_globals.get('EEPROM'), node_address=node_address, uuid=uuid)
         log_msg(f"Photon initialized - Node: {node_address}, UUID: {uuid}")
     except Exception as e:
         log_msg(f"Photon unavailable ({e}) - running in manual mode (buttons only)")
+        LED.state('ready')  # no Photon lifecycle to drive the LED - just show ready
 
     # Serial console over USB VCP (press ESC three times to enter an interactive menu)
     try:
@@ -183,8 +199,12 @@ def run_app(app_globals):
                 log_msg(f"Button: jog {name} {jog_click_ticks}t -> {target} ({SERVO.result_name})")
             elif evt == 'long_press':
                 # Free-hand sweep from the actual position; deliberately not grid-indexed.
+                # The peel motor is started/stopped by Servo itself (tracking the actual
+                # drive move), so it keeps running for the whole hold and is cut on release.
+                # timeout_ms=0: the hold is bounded by the button release (and stall
+                # detection), not the per-move time cap - a >10s hold must keep feeding.
                 target = SERVO.get_current_position() + direction * jog_hold_ticks
-                SERVO.set_target(target, profile=slot_profile)
+                SERVO.set_target(target, profile=slot_profile, timeout_ms=0)
                 log_msg(f"Button: hold {name} start")
             elif evt == 'release':
                 SERVO.stop()
@@ -205,6 +225,10 @@ def run_app(app_globals):
     async def main_loop():
         loop_count = 0
         gc_count = 0
+        overtemp_active = False
+        voltage_fault_active = False
+        led_fault_active = False
+        led_prefault_color = None   # color() to restore once the fault clears
         
         # Rolling statistics for performance monitoring
         servo_times = []
@@ -220,13 +244,21 @@ def run_app(app_globals):
                 loop_start = time.ticks_ms()
                 wdt_feed()  # keep the watchdog happy each control cycle
 
+                # Advance any active LED blink (non-blocking, event-loop driven)
+                LED.poll()
+
                 # Serial console: ESC x3 enters an interactive menu. The app is paused
-                # (servo stopped) while the menu is open; resume cleanly afterwards.
+                # (servo stopped) while the menu is open; blink the current color for the
+                # duration as the "console is open" indicator (console.py itself calls
+                # LED.poll() during its input-wait loop to keep the blink animating).
+                # blink() only toggles on/off over whatever color() last set - it doesn't
+                # change or need to save/restore the color itself, so this is safe to use
+                # even if a fault is turning the LED red at the same time.
                 if CONSOLE and CONSOLE.poll():
                     SERVO.stop()
-                    LED.color('cyan')
+                    LED.blink()
                     result = await CONSOLE.run()
-                    LED.color('green')
+                    LED.blink(0)
                     if result == 'repl':
                         log_msg("Exiting to REPL from console")
                         SERVO.disable()
@@ -257,13 +289,61 @@ def run_app(app_globals):
                         gc.collect()
                         ran_gc = True
 
+                    # Read the ADC once per tick; the heartbeat message and the
+                    # fault checks below share these values.
+                    vdc = ADC.vmonvdc() if ADC else None
+                    vsys = ADC.vmonsys() if ADC else None
+                    mcu_temp = ADC.temp() if ADC else None
+
                     # Log basic message
-                    log_msg(log_interval(app_globals))
-                    
+                    log_msg(log_interval(vdc, vsys, mcu_temp))
+
                     # Set flag to calculate stats in background
                     calculate_stats = True
-                    
+
+                    # Overtemperature check - thermal drift is slow, so heartbeat
+                    # cadence (APP.TICK_INTERVAL_MS) is frequent enough.
+                    if temp_max_c > 0 and mcu_temp is not None:
+                        new_overtemp = mcu_temp >= temp_max_c
+                        if new_overtemp != overtemp_active:
+                            # Conditional pulled out of the f-string: MicroPython's
+                            # lexer treats the ':' inside the quoted text as the
+                            # start of a format spec (SyntaxError when frozen).
+                            state = 'FAULT: Over temperature' if new_overtemp else 'Temperature back to normal'
+                            log_msg(f"{state} ({mcu_temp:.0f}C, limit {temp_max_c}C)")
+                        overtemp_active = new_overtemp
+
+                    # Voltage-range check - same slow-drift reasoning as overtemp;
+                    # heartbeat cadence is frequent enough to catch a bad rail.
+                    vdc_bad = vdc is not None and not (vdc_min <= vdc <= vdc_max)
+                    vsys_bad = vsys is not None and not (vsys_min <= vsys <= vsys_max)
+                    new_voltage_fault = vdc_bad or vsys_bad
+                    if new_voltage_fault != voltage_fault_active:
+                        if new_voltage_fault:
+                            log_msg(f"FAULT: Voltage out of range (VDC={vdc}V [{vdc_min}-{vdc_max}], " +
+                                    f"VSYS={vsys}V [{vsys_min}-{vsys_max}])")
+                        else:
+                            log_msg(f"Voltage back to normal (VDC={vdc}V, VSYS={vsys}V)")
+                    voltage_fault_active = new_voltage_fault
+
                 tick_stop = time.ticks_ms()
+
+                # LED fault indicator: solid red for as long as any fault condition
+                # holds (motor stall/timeout from any source - Photon move, button
+                # click/hold-jog - overtemperature, or an out-of-range supply rail).
+                # On the rising edge, remember whatever color() was showing so it can be
+                # restored once the fault clears; color('red') is reasserted every tick
+                # while already active so it always wins over any color set earlier this
+                # tick (e.g. Photon's cyan-restore or CMD_INITIALIZE_FEEDER's green).
+                fault_now = overtemp_active or voltage_fault_active or SERVO.result in (RESULT_STALLED, RESULT_TIMEOUT)
+                if fault_now:
+                    if not led_fault_active:
+                        led_prefault_color = LED.current_color
+                    LED.state('fault')
+                    led_fault_active = True
+                elif led_fault_active:
+                    led_fault_active = False
+                    LED.color(led_prefault_color)
 
                 # Calculate timing for this loop
                 servo_elapsed = time.ticks_diff(servo_stop, loop_start)
@@ -302,7 +382,12 @@ def run_app(app_globals):
 
                 if not ran_gc:
                     log_msg(f"Loop overrun: {loop_elapsed}ms (target: {loop_time_ms}ms)")
-                
+
+                # Overrun path: still yield once so queued tasks (the stats
+                # calculation) and any other coroutines get CPU time even under
+                # sustained overrun - otherwise create_task()'d work piles up unrun.
+                await asyncio.sleep_ms(0)
+
             except Exception as e:
                 log_msg(f"Main loop error: {e}")
                 await asyncio.sleep_ms(100)
@@ -322,11 +407,11 @@ def run_app(app_globals):
         asyncio.run(main_loop())
     except KeyboardInterrupt:
         log_msg("Application interrupted by user")
-        LED.color('yellow')
+        LED.state('stopped')
         raise
     except Exception as e:
         log_msg(f"Application error: {e}")
-        LED.color('red')
+        LED.state('fault')
     finally:
         micropython.kbd_intr(3)
         log_msg("Application cleanup")

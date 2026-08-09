@@ -12,15 +12,18 @@ class DmesgLogger:
 
     File logging (off by default) keeps a single handle open and writes through it,
     flushing every `flush_interval` lines, so it avoids an open()/close() per message.
-    Rotation cycles through a fixed set of `max_files` files (oldest is overwritten),
-    so disk use is bounded to max_file_size * max_files - important on a small flash.
+    Rotation starts a new file with an ever-increasing sequence number and deletes the
+    oldest once there are more than `max_files`, so disk use is bounded to
+    max_file_size * max_files (important on a small flash) while keeping a filename
+    ordering (and dump_files() listing) that's always true chronological order, even
+    across reboots.
     """
 
     def __init__(self, buffer_size=50, default_filepath='/flash/dmesg.log',
                  max_file_size=8192, max_files=3, flush_interval=1,
                  file_logging_enabled=False):
         # In-memory ring buffer as a plain list (MicroPython's deque isn't iterable,
-        # which would break show()/save_buffer_to_file()).
+        # which would break show()).
         self.buffer = []
         self.buffer_size = buffer_size
         self.log_count = 0   # monotonic total; never resets, used by console tail
@@ -29,16 +32,27 @@ class DmesgLogger:
         self.max_size = max_file_size
         self.max_files = max_files if max_files >= 1 else 1
         self.flush_interval = flush_interval if flush_interval >= 1 else 1
-        self.file_index = 0
         self.file_enabled = False
         self.log_dir = os.path.dirname(default_filepath)
         self.log_base = os.path.basename(default_filepath).split('.')[0]
-        self.filepath = self._indexed_path(self.file_index)
+        # Resume the newest existing rotated file (if any) instead of always restarting
+        # at sequence 0, so a reboot doesn't jump backward into old file content or break
+        # the chronological ordering dump_files() relies on.
+        existing = self._discover_files()
+        self._current_seq = existing[-1] if existing else 0
+        self.filepath = self._indexed_path(self._current_seq)
 
         # Open-handle state
         self._fh = None
         self._bytes_in_file = 0
         self._flush_counter = 0
+
+        # Uptime tracking immune to time.ticks_ms() wraparound: like Encoder.update()'s
+        # counter-wraparound handling, each log() call folds the delta since the last
+        # call into a running total that never resets, so displayed timestamps keep
+        # climbing indefinitely instead of jumping backward when ticks_ms() wraps.
+        self._last_ticks_ms = time.ticks_ms()
+        self._uptime_ms = 0
 
         self.log("DMESG initialized.")
         if file_logging_enabled:
@@ -46,9 +60,43 @@ class DmesgLogger:
 
     # --- File helpers -----------------------------------------------------
 
-    def _indexed_path(self, i):
-        name = f"{self.log_base}_{i:03d}.log"
+    def _indexed_path(self, seq):
+        name = f"{self.log_base}_{seq:03d}.log"
         return f"{self.log_dir}/{name}" if self.log_dir else name
+
+    def _discover_files(self):
+        """Return existing rotated-file sequence numbers for log_base, sorted oldest-first.
+
+        Sequence numbers are assigned once and never reused (see _rotate_file()), so this
+        sort order always matches true chronological order - unlike a small modulo-cycled
+        index, which starts reusing low numbers for the newest data once it wraps.
+        """
+        prefix = self.log_base + '_'
+        try:
+            entries = os.listdir(self.log_dir) if self.log_dir else os.listdir()
+        except OSError:
+            entries = []
+        found = []
+        for name in entries:
+            if name.startswith(prefix) and name.endswith('.log'):
+                try:
+                    found.append(int(name[len(prefix):-4]))
+                except ValueError:
+                    pass
+        found.sort()
+        return found
+
+    def _prune_old_files(self):
+        """Delete the oldest rotated files once there are more than max_files."""
+        existing = self._discover_files()
+        excess = len(existing) - self.max_files
+        if excess <= 0:
+            return
+        for seq in existing[:excess]:
+            try:
+                os.remove(self._indexed_path(seq))
+            except OSError:
+                pass
 
     def _ensure_log_dir(self):
         """Create log directory if needed. Disables file logging on failure."""
@@ -90,10 +138,14 @@ class DmesgLogger:
             self._fh = None
 
     def _rotate_file(self):
-        """Advance to the next file in the cycle, discarding the oldest."""
-        self.file_index = (self.file_index + 1) % self.max_files
-        self.filepath = self._indexed_path(self.file_index)
+        """Start a new log file with the next (never-reused) sequence number, then prune
+        old ones beyond max_files. Monotonic sequence numbers keep dump_files()'s sorted
+        file listing in true chronological order indefinitely, including across reboots.
+        """
+        self._current_seq += 1
+        self.filepath = self._indexed_path(self._current_seq)
         self._open_file(truncate=True)
+        self._prune_old_files()
 
     def _write_line(self, text):
         """Write one line through the open handle (caller ensures file_enabled)."""
@@ -119,10 +171,31 @@ class DmesgLogger:
 
     # --- Logging ----------------------------------------------------------
 
+    def _uptime(self):
+        """Return an ever-increasing uptime in ms, immune to time.ticks_ms() wraparound.
+
+        ticks_ms() wraps at an implementation-defined period; reconstructing a running
+        total from the delta since the last call (the same technique Encoder.update()
+        uses for its hardware counter) means the displayed timestamp keeps climbing
+        instead of jumping backward whenever ticks_ms() wraps.
+        """
+        now = time.ticks_ms()
+        delta = time.ticks_diff(now, self._last_ticks_ms)
+        if delta > 0:
+            self._uptime_ms += delta
+        self._last_ticks_ms = now
+        return self._uptime_ms
+
+    def uptime_ms(self):
+        """Public wrap-safe uptime for other modules (e.g. the console's health and
+        status lines) - raw time.ticks_ms() wraps back to 0 every ~12 days."""
+        return self._uptime()
+
     def log(self, message):
         """Log message with an uptime timestamp to memory and optionally to file."""
-        uptime_ms = time.ticks_ms()
-        timestamp = f"[{uptime_ms // 1000:03d}.{uptime_ms % 1000:03d}]"
+        uptime_ms = self._uptime()
+        secs, ms = divmod(uptime_ms, 1000)
+        timestamp = f"[{secs:03d}.{ms:03d}]"
         full_message = f"{timestamp} {message}"
 
         self.log_count += 1
@@ -142,30 +215,22 @@ class DmesgLogger:
                 self._fh.flush()
             except OSError:
                 pass
-        try:
-            entries = os.listdir(self.log_dir) if self.log_dir else os.listdir()
-        except OSError:
-            entries = []
-        prefix = self.log_base + '_'
-        found = False
-        for name in sorted(entries):
-            if name.startswith(prefix) and name.endswith('.log'):
-                found = True
-                path = f"{self.log_dir}/{name}" if self.log_dir else name
-                print(f"--- {path} ---")
-                try:
-                    with open(path) as f:
-                        for line in f:
-                            print(line, end='')
-                except OSError as e:
-                    print(f"(error reading {path}: {e})")
-        if not found:
+        # _discover_files() sorts by parsed sequence number (not raw filename string), so
+        # ordering stays correct even once sequence numbers grow past 3 digits (where a
+        # plain string sort of "_1000.log" vs "_999.log" would otherwise get it backwards).
+        existing = self._discover_files()
+        if not existing:
             print("(no rotated log files)")
-
-    def clear(self):
-        """Clear memory buffer."""
-        self.buffer = []
-        self.log("Memory log cleared.")
+            return
+        for seq in existing:
+            path = self._indexed_path(seq)
+            print(f"--- {path} ---")
+            try:
+                with open(path) as f:
+                    for line in f:
+                        print(line, end='')
+            except OSError as e:
+                print(f"(error reading {path}: {e})")
 
     def show(self):
         """Display all memory buffer entries."""
@@ -188,8 +253,9 @@ class DmesgLogger:
         if filepath:
             self.log_dir = os.path.dirname(filepath)
             self.log_base = os.path.basename(filepath).split('.')[0]
-            self.file_index = 0
-            self.filepath = self._indexed_path(self.file_index)
+            existing = self._discover_files()
+            self._current_seq = existing[-1] if existing else 0
+            self.filepath = self._indexed_path(self._current_seq)
 
         if self.file_enabled:
             return  # already on
@@ -201,36 +267,12 @@ class DmesgLogger:
             self.log(f"File logging enabled to {self.filepath}")
             self._save_timestamp()
 
-    def close(self):
-        """Flush and close the log file handle (call on shutdown)."""
-        self._close_file()
-
-    def _save_timestamp(self, offset=0):
+    def _save_timestamp(self):
         """Append a wall-clock timestamp line (only meaningful if the RTC is set)."""
         if not self.file_enabled:
             return
         try:
-            t = time.localtime(time.time() + offset * 3600)
+            t = time.localtime(time.time())
             self._write_line(f"DMESG timestamp: {t[0]:04}-{t[1]:02}-{t[2]:02} {t[3]:02}:{t[4]:02}:{t[5]:02}")
         except Exception as e:
             print(f"Error writing timestamp to {self.filepath}: {e}")
-
-    def save_buffer_to_file(self, filepath, offset=0):
-        """Save the entire in-memory buffer to a one-off file (separate from the log)."""
-        try:
-            target_dir = os.path.dirname(filepath)
-            if target_dir and not os.path.exists(target_dir):
-                os.makedirs(target_dir)
-
-            with open(filepath, 'w') as f:
-                f.write("--- DMESG Buffer Dump ---\n")
-                for entry in self.buffer:
-                    f.write(entry + '\n')
-
-                t = time.localtime(time.time() + offset * 3600)
-                f.write(f"DMESG saved: {t[0]:04}-{t[1]:02}-{t[2]:02} {t[3]:02}:{t[4]:02}:{t[5]:02}\n")
-                f.write("-------------------------\n")
-
-            print(f"DMESG buffer saved to {filepath}")
-        except OSError as e:
-            print(f"Error saving buffer to {filepath}: {e}")

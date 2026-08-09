@@ -5,6 +5,8 @@
 # drives.py - Motor controller for DRIVE and PEEL motor
 
 import pyb
+import machine
+import micropython
 
 class HBridge:
     """Motor controller for DRIVE and PEEL motors using PWM H-bridge."""
@@ -49,7 +51,7 @@ class HBridge:
                 pwm.pulse_width_percent(0)
             
             # Setup enable pin
-            self.enable_pin = pyb.Pin(enable, pyb.Pin.OUT_PP)
+            self.enable_pin = machine.Pin(enable, machine.Pin.OUT_PP)
             self.disable()
             
             self._log("OK - Motors disabled")
@@ -77,8 +79,11 @@ class HBridge:
     def enabled(self):
         return self._enabled
 
+    @micropython.native
     def _set_motor_pwm(self, pwm1, pwm2, pwm_min, speed, forward):
-        """Set PWM for motor with relative speed mapping."""
+        """Set PWM for motor with relative speed mapping. Native: with drive_set()
+        this is the last bytecode link in the servo's real-time burst chain
+        (update -> _forward_speed -> here, every control tick)."""
         speed = 0 if speed < 0 else (100 if speed > 100 else speed)
         
         # Map relative speed to actual PWM range
@@ -127,8 +132,11 @@ class HBridge:
         else:
             self._set_motor_pwm(self.peel1_pwm, self.peel2_pwm, self.peel_pwm_min, abs(speed), speed > 0)
 
+    @micropython.native
     def drive_set(self, speed, brake=None, absolute_pwm=False):
-        """Set drive motor speed (-100 to 100)."""
+        """Set drive motor speed (-100 to 100). Native: called once per control tick
+        from the servo's real-time burst loop (peel_set is not - it only runs at
+        move transitions, so it stays bytecode)."""
         if not self.enabled:
             return
         
@@ -156,12 +164,4 @@ class HBridge:
                 self.drive2_pwm.pulse_width_percent(pwm_val)
         else:
             self._set_motor_pwm(self.drive1_pwm, self.drive2_pwm, self.drive_pwm_min, abs(speed), speed > 0)
-
-    def deinit(self):
-        """Deinitialize timer and pins."""
-        self._log("Deinitializing")
-        if hasattr(self, 'timer'): self.timer.deinit()
-        if hasattr(self, 'enable_pin'): 
-            self.disable()
-            self.enable_pin.init(pyb.Pin.IN)
 

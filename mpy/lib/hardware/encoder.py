@@ -5,6 +5,7 @@
 # encoder.py - Uses STM32 hardware quadrature encoder (4x)
 
 import pyb
+import machine
 import micropython
 
 _DEFAULT_MAX_COUNT = micropython.const(65535)
@@ -27,8 +28,8 @@ class Encoder:
 
         try:
             # Setup pins
-            pyb.Pin(pin_a_name, pyb.Pin.AF_PP, af=pin_af)
-            pyb.Pin(pin_b_name, pyb.Pin.AF_PP, af=pin_af)
+            machine.Pin(pin_a_name, machine.Pin.AF_PP, af=pin_af)
+            machine.Pin(pin_b_name, machine.Pin.AF_PP, af=pin_af)
 
             # Setup timer
             self.encoder_timer = pyb.Timer(timer_num, prescaler=0, period=max_count)

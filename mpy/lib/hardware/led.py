@@ -2,10 +2,9 @@
 # Copyright (C) 2025 FexTel, Inc. <info@ibscale.com>
 # Author: James Pearson <jamesp@ibscale.com>
 #
-# led.py - RGB status LED on three PWM channels, with timer-driven blink.
+# led.py - RGB status LED on three PWM channels, with event-loop-driven blink.
 
 import pyb
-import micropython
 import time
 
 # The 16 standard ANSI/VGA colors as (R, G, B) 0-255 (common-anode levels; INVERT flips
@@ -32,116 +31,177 @@ COLORS = {
 }
 
 
-class RGBLED:
-    """RGB status LED over three pyb.LED PWM channels, with non-blocking blink.
+# Status-name -> color policy, overridable via LED.STATES in sysconfig. This is the
+# single place the "what color means what" decision lives; callers say
+# LED.state('fault') etc. and never hard-code colors, so re-theming or swapping the
+# indicator hardware touches only this map / this file.
+_DEFAULT_STATES = {
+    'boot': '#800080',      # power-up until the application takes over (purple)
+    'waiting': 'yellow',    # app running, Photon not initialized by a host yet
+    'ready': 'green',       # initialized / manual mode ready
+    'feeding': 'cyan',      # move in progress
+    'identify': 'blue',     # host-requested identify flash
+    'fault': 'red',         # stall/timeout/overtemp/voltage fault
+    'stopped': 'yellow',    # application halted (e.g. dropped to REPL)
+}
 
-    Colors are referenced by name (see COLORS); intensity() drives each channel's PWM.
-    Set INVERT=True for a common-cathode LED (duty is inverted). Blink runs on a hardware
-    Timer; a counted blink returns to the on-color when it finishes, an indefinite blink
-    restores the pre-blink color when stopped.
+
+def _resolve(name):
+    """Resolve a color name (see COLORS) or a HEX/HTML color code - '#RGB' or
+    '#RRGGBB', case-insensitive - to an (r, g, b) 0-255 tuple. Returns None if `name`
+    is neither a recognized color name nor a validly-formed hex code."""
+    if isinstance(name, str) and name.startswith('#'):
+        hexstr = name[1:]
+        if len(hexstr) == 3:
+            hexstr = ''.join(c * 2 for c in hexstr)
+        if len(hexstr) != 6:
+            return None
+        try:
+            return (int(hexstr[0:2], 16), int(hexstr[2:4], 16), int(hexstr[4:6], 16))
+        except ValueError:
+            return None
+    return COLORS.get(name)
+
+
+class RGBLED:
+    """RGB status LED over three hardware-timer PWM channels, with non-blocking, event-loop-driven blink.
+
+    Drives TIM(x) channels directly via pyb.Timer (same pattern as hardware/drives.py)
+    rather than pyb.LED. pyb.LED.intensity() only uses real PWM for values strictly
+    between 0 and 255 - exact 0/255 fall back to a hard digital on/off and, if that
+    channel had PWM running, tear the pin back out of alternate-function mode. On this
+    board that left the (non-boundary) mid-range PWM values it actually needs - like the
+    inverted green channel at boot - dead until something later happened to nudge it
+    into working, showing the LED unlit at power-up until, e.g., a full color-cycle
+    test managed to leave it running. Driving the timer/channels ourselves gives
+    continuous PWM across the whole 0-255 range with no digital fallback.
+
+    Colors are referenced either by name (see COLORS) or as a HEX/HTML color code -
+    '#RGB' or '#RRGGBB', case-insensitive (e.g. '#0f0' or '#00FF00' for green) - anywhere
+    a color name is accepted (color(), and by extension whatever blink() is currently
+    showing).
+
+    Deliberately minimal, two-verb interface:
+      - color(name) sets the solid/resting color. Callers never need to save or restore
+        a previous color themselves when they're done with a temporary color (e.g. cyan
+        during a move, red for a fault, blue for identify) - they just remember whatever
+        current_color was beforehand and call color() again with that name once they're
+        done. Since these overrides are always started and finished within a single,
+        well-defined stretch of code (a blocking move, a fault condition, a timed
+        identify flash), that simple "remember and restore" pattern nests correctly on
+        its own without this class needing to track a stack of prior states.
+      - blink(interval_ms) blinks the *current* color (whatever color() last set) on/off
+        at interval_ms; blink(0) stops blinking and shows the current color solid again.
+        Blinking never changes what color() is - it's a toggle overlaid on top of it, so
+        a caller can freely call color() while blinking is active (e.g. a fault turning
+        the LED red while the console-open blink is active) and it keeps blinking, just
+        with the new color.
+
+    Non-blocking; poll() must be called every main-loop iteration (~20ms) to advance an
+    active blink.
     """
 
-    def __init__(self, DMESG=None, REDLED=1, GREENLED=2, BLUELED=3, INVERT=False,
-                 ONCOLOR='green', blink_timer_id=2, LOG=False):
+    def __init__(self, DMESG=None, REDPIN='LEDRED', GREENPIN='LEDGREEN', BLUEPIN='LEDBLUE',
+                 TIMER_ID=1, PWM_FREQUENCY=1000, RED_CH=1, GREEN_CH=2, BLUE_CH=3,
+                 INVERT=False, STATES=None, LOG=False):
         self.DMESG, self.LOG, self.invert = DMESG, LOG, INVERT
-        self.on_color = ONCOLOR if ONCOLOR in COLORS else 'white'
-        self.blink_timer_id = blink_timer_id
+        self._states = dict(_DEFAULT_STATES)
+        if STATES:
+            self._states.update(STATES)
         self.ch = None
+        self.period = 0
         self._current = 'off'
-        self._timer = None
-        self._blink_rgb = (0, 0, 0)   # color shown on the "on" half of a blink
-        self._base_rgb = (0, 0, 0)    # color restored when the blink stops
+        self._blinking = False
         self._blink_on = False
-        self._count = 0               # remaining blink cycles (0 = forever)
+        self._interval_ms = 0
+        self._next_tick = 0
 
         try:
-            self.ch = (pyb.LED(REDLED), pyb.LED(GREENLED), pyb.LED(BLUELED))
+            self.pwm_timer = pyb.Timer(TIMER_ID, freq=PWM_FREQUENCY)
+            self.period = self.pwm_timer.period()
+            self.ch = (
+                self.pwm_timer.channel(RED_CH, pyb.Timer.PWM, pin=pyb.Pin(REDPIN)),
+                self.pwm_timer.channel(GREEN_CH, pyb.Timer.PWM, pin=pyb.Pin(GREENPIN)),
+                self.pwm_timer.channel(BLUE_CH, pyb.Timer.PWM, pin=pyb.Pin(BLUEPIN)),
+            )
         except Exception as e:
             self._log(f"Init failed: {e}", force=True)
             return
-        self._log(f"Init - R/G/B:{REDLED}/{GREENLED}/{BLUELED}, Invert:{INVERT}, OnColor:{self.on_color}, Timer:{blink_timer_id}", force=True)
-        self.color(self.on_color)
+        self._log(f"Init - R/G/B:{REDPIN}/{GREENPIN}/{BLUEPIN}, Timer:{TIMER_ID}@{PWM_FREQUENCY}Hz " +
+                  f"(period={self.period}), Invert:{INVERT}", force=True)
+        # Boot default (purple unless re-themed), so it's visually obvious the
+        # application hasn't taken over yet.
+        self.state('boot')
 
     def _log(self, msg, force=False):
         if (self.LOG or force) and self.DMESG:
             self.DMESG.log(f"LED: {msg}")
 
     def _set(self, rgb):
-        """Write an (r, g, b) tuple to the channels. Allocation-free, so ISR-safe."""
+        """Write an (r, g, b) tuple to the channels."""
         if self.ch:
             r, g, b = rgb
             if self.invert:
                 r, g, b = 255 - r, 255 - g, 255 - b
-            self.ch[0].intensity(r)
-            self.ch[1].intensity(g)
-            self.ch[2].intensity(b)
+            period = self.period
+            self.ch[0].pulse_width(r * period // 255)
+            self.ch[1].pulse_width(g * period // 255)
+            self.ch[2].pulse_width(b * period // 255)
 
     def color(self, name):
-        """Set a solid color by name; stops any active blink."""
-        if self._timer:
-            self.stop_blink()
-        rgb = COLORS.get(name)
+        """Set the solid/resting color, by name (see COLORS) or as a HEX/HTML color
+        code ('#RGB' or '#RRGGBB'). If a blink is currently active, it keeps blinking -
+        just with this new color from here on - rather than being interrupted."""
+        rgb = _resolve(name)
         if rgb is None:
             self._log(f"Unknown color '{name}'")
             return
         self._current = name
-        self._set(rgb)
+        if not self._blinking:
+            self._set(rgb)
 
-    def off(self):
-        self.color('off')
+    def state(self, name):
+        """Set the color mapped to a named status (see _DEFAULT_STATES / LED.STATES
+        in sysconfig). Unknown names fall through to color(), so a raw color name
+        or hex code also works here."""
+        self.color(self._states.get(name, name))
 
-    def on(self, name=None):
-        self.color(name or self.on_color)
+    @property
+    def current_color(self):
+        """Name of the color currently set via color() (regardless of blink state)."""
+        return self._current
 
-    def blink(self, name, interval_ms=500, count=None):
-        """Blink between `name` and the current color. count=None/0 blinks forever."""
-        rgb = COLORS.get(name)
-        if not self.ch or interval_ms <= 0 or rgb is None:
-            if rgb is None:
-                self._log(f"Unknown color '{name}'")
+    def blink(self, interval_ms=500):
+        """Blink the current color on/off at interval_ms, forever, until blink(0) is
+        called. blink(0) stops blinking and shows the current color solid.
+
+        Non-blocking; actual toggling happens in poll(), called from the main loop.
+        """
+        if interval_ms <= 0:
+            self._blinking = False
+            self._set(_resolve(self._current) or (0, 0, 0))
             return
-        self.stop_blink()
-        self._base_rgb = COLORS.get(self._current, (0, 0, 0))
-        self._blink_rgb = rgb
-        self._count = count if (count and count > 0) else 0
+        self._blinking = True
         self._blink_on = True
-        self._set(rgb)
-        try:
-            self._timer = pyb.Timer(self.blink_timer_id, freq=1000 / interval_ms)
-            self._timer.callback(self._tick)
-        except Exception as e:
-            self._timer = None
-            self._log(f"Blink failed: {e}", force=True)
+        self._interval_ms = interval_ms
+        self._set(_resolve(self._current) or (0, 0, 0))
+        self._next_tick = time.ticks_add(time.ticks_ms(), interval_ms)
 
-    def _tick(self, _t):
-        # Hard timer IRQ: keep allocation-free. Toggle blink color <-> base color.
-        if self._timer is None:
+    def poll(self):
+        """Advance an active blink. Call once per main-loop iteration (~20ms)."""
+        if not self._blinking:
             return
-        if self._count and not self._blink_on:   # about to begin another cycle
-            self._count -= 1
-            if self._count <= 0:
-                self._timer.deinit()
-                self._timer = None
-                micropython.schedule(self._blink_done, None)
-                return
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._next_tick) < 0:
+            return
+        self._next_tick = time.ticks_add(self._next_tick, self._interval_ms)
         self._blink_on = not self._blink_on
-        self._set(self._blink_rgb if self._blink_on else self._base_rgb)
-
-    def _blink_done(self, _):
-        self.on()   # counted blink finished -> back to the on-color
-
-    def stop_blink(self):
-        """Stop blinking and restore the pre-blink color."""
-        if self._timer:
-            self._timer.deinit()
-            self._timer = None
-            self._count = 0
-            self._set(self._base_rgb)
+        self._set(_resolve(self._current) or (0, 0, 0) if self._blink_on else (0, 0, 0))
 
     def test(self, delay_ms=150):
         """Cycle through the palette for a visual check (blocking)."""
-        self.stop_blink()
+        self.blink(0)
         for name in COLORS:
             self.color(name)
             time.sleep_ms(delay_ms)
-        self.color(self.on_color)
+        self.color('green')

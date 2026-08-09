@@ -33,7 +33,7 @@ def _log_system_info(DMESG):
     except Exception as e:
         _log(DMESG, f"ERROR reading VFS info: {e}", force=True)
 
-def _setup_identity(DMESG, SYSCONFIG, LOG, app_passthrough):
+def _setup_identity(DMESG, SYSCONFIG, app_passthrough):
     """Sets UUID and reads Slot ID from EEPROM."""
     debug_mode = SYSCONFIG.get('SYSTEM.DEBUG', False)
     
@@ -45,8 +45,12 @@ def _setup_identity(DMESG, SYSCONFIG, LOG, app_passthrough):
     except Exception as e:
         _log(DMESG, f"ERROR setting UUID: {e}", force=True)
 
-    # Initialize EEPROM if configured and read Slot ID
-    slot_id = 0
+    # Initialize EEPROM if configured and read Slot ID. Fallback when the chip can't
+    # be read is 255 = unaddressed, matching the reference Photon firmware's blank
+    # floor EEPROM behavior: the feeder answers broadcast commands only, and its
+    # replies carry from=0xFF so the host can tell the floor is unprogrammed.
+    # (Never 0 - that's the host's bus address.)
+    slot_id = 255
     eeprom_pin = SYSCONFIG.get('SYSTEM.EEPROM_PIN')
     if not eeprom_pin:
         _log(DMESG, f"EEPROM: No pin configured - Using Slot ID {slot_id}", force=True)
@@ -60,11 +64,17 @@ def _setup_identity(DMESG, SYSCONFIG, LOG, app_passthrough):
         eeprom = EEPROM(eeprom_pin, driver=eeprom_driver, DMESG=DMESG, LOG=debug_mode)
         app_passthrough['EEPROM'] = eeprom
         
-        # Read Slot ID from EEPROM
+        # Read Slot ID from EEPROM. Valid slots are 1-254: 0 is reserved (the host's
+        # bus address) and 255 is broadcast - a blank/unprogrammed EEPROM typically
+        # reads one of those two, so both land on the 255 unaddressed default.
         slot_data = eeprom.read_memory(0, 1)
         if slot_data and len(slot_data) == 1:
-            slot_id = int(slot_data[0])
-            _log(DMESG, f"EEPROM: Read Slot ID {slot_id} from device", force=True)
+            value = int(slot_data[0])
+            if 1 <= value <= 254:
+                slot_id = value
+                _log(DMESG, f"EEPROM: Read Slot ID {slot_id} from device", force=True)
+            else:
+                _log(DMESG, f"EEPROM: Slot ID {value} is reserved/invalid - Using default {slot_id}", force=True)
         else:
             _log(DMESG, f"EEPROM: No valid Slot ID found - Using default {slot_id}", force=True)
     except Exception as e:
@@ -73,7 +83,7 @@ def _setup_identity(DMESG, SYSCONFIG, LOG, app_passthrough):
     SYSCONFIG.set('SYSTEM.SLOTID', slot_id)
     _log(DMESG, f"Using Slot ID: {slot_id}")
 
-def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
+def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough):
     """Initializes hardware components."""
     debug_mode = SYSCONFIG.get('SYSTEM.DEBUG', False)
 
@@ -113,11 +123,11 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
         from hardware.led import RGBLED
         led_cfg = SYSCONFIG.get('LED')
         LED = RGBLED(
-            DMESG=DMESG, REDLED=led_cfg['REDLED'], GREENLED=led_cfg['GREENLED'],
-            BLUELED=led_cfg['BLUELED'], INVERT=led_cfg['INVERT'], ONCOLOR=led_cfg['ONCOLOR'],
-            blink_timer_id=led_cfg['BLINK_TIMER']
+            DMESG=DMESG, REDPIN=led_cfg['REDPIN'], GREENPIN=led_cfg['GREENPIN'], BLUEPIN=led_cfg['BLUEPIN'],
+            TIMER_ID=led_cfg['TIMER_ID'], PWM_FREQUENCY=led_cfg['PWM_FREQUENCY'],
+            RED_CH=led_cfg['RED_CH'], GREEN_CH=led_cfg['GREEN_CH'], BLUE_CH=led_cfg['BLUE_CH'],
+            INVERT=led_cfg['INVERT'], STATES=led_cfg.get('STATES')
         )
-        LED.color("green")
         app_passthrough['LED'] = LED
     except Exception as e:
         _log(DMESG, f"CRITICAL ERROR initializing LED: {e}", force=True)
@@ -159,11 +169,17 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
         _log(DMESG, f"CRITICAL ERROR initializing encoder: {e}", force=True)
         raise
 
-    # Servo
+    # Servo (with its injected peel motor - swap the peel mechanism here; anything
+    # with forward()/reverse()/stop()/is_idle() satisfies the servo's contract)
     try:
         _log(DMESG, "Initializing servo...", debug_mode=debug_mode)
+        from system.peel import PeelMotor
         from system.servo import Servo
         servo_cfg = SYSCONFIG.get('SERVO')
+        PEEL = PeelMotor(
+            drives=DRIVES, default_speed=servo_cfg.get('PEEL_SPEED', 100),
+            dmesg=DMESG, debug_enabled=servo_cfg.get('DEBUG', debug_mode)
+        )
         # Flatten the profile config into {name: (max_scale, accel_scale)} tuples.
         profiles = {}
         for _name, _p in (servo_cfg.get('PROFILES') or {}).items():
@@ -172,6 +188,8 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
             drives=DRIVES, encoder=ENCODER, dmesg=DMESG,
             max_output=servo_cfg.get('MAX', 80), creep_output=servo_cfg.get('CREEP', 15),
             min_output=servo_cfg.get('MIN', 5), tolerance=servo_cfg.get('TOLERANCE', 15),
+            kick_output=servo_cfg.get('KICK', 60), kick_ticks=servo_cfg.get('KICK_TICKS', 5),
+            kick_ms=servo_cfg.get('KICK_MS', 100),
             backlash_takeup=servo_cfg.get('TAKEUP', 200),
             accel_ticks=servo_cfg.get('ACCEL_TICKS', 200), decel_ticks=servo_cfg.get('DECEL_TICKS', 250),
             creep_ticks=servo_cfg.get('CREEP_TICKS', 150), stable_updates=servo_cfg.get('UPDATES', 3),
@@ -179,8 +197,9 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
             stall_ms=servo_cfg.get('STALL_MS', 300), stall_eps=servo_cfg.get('STALL_EPS', 3),
             move_timeout_ms=servo_cfg.get('MOVE_TIMEOUT_MS', 10000),
             profiles=profiles, default_profile=SYSCONFIG.get('SYSTEM.SLOT_PROFILE', 'normal'),
-            peel_enable=servo_cfg.get('PEEL_ENABLE', True), peel_speed=servo_cfg.get('PEEL_SPEED', 100),
-            peel_time_ms=servo_cfg.get('PEEL_RUN_MS', 1000), debug_enabled=servo_cfg.get('DEBUG', debug_mode)
+            peel=PEEL, peel_enable=servo_cfg.get('PEEL_ENABLE', True),
+            post_peel_ms=servo_cfg.get('POST_PEEL_MS', 200),
+            debug_enabled=servo_cfg.get('DEBUG', debug_mode)
         )
         app_passthrough['SERVO'] = SERVO
     except Exception as e:
@@ -193,9 +212,10 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
         from hardware.rs485 import RS485
         rs485_cfg = SYSCONFIG.get('RS485')
         app_passthrough['RS485'] = RS485(
-            slot_id=SYSCONFIG.get('SYSTEM.SLOTID', 0), de_pin_name=rs485_cfg['DE_PIN'],
+            de_pin_name=rs485_cfg['DE_PIN'],
             uart_id=rs485_cfg['UART_ID'], baudrate=rs485_cfg['BAUDRATE'], data_bits=rs485_cfg['DATA_BITS'],
-            parity=rs485_cfg['PARITY'], stop_bits=rs485_cfg['STOP_BITS'], rx_buffer_size=rs485_cfg['BUFFER_SIZE'],
+            parity=rs485_cfg['PARITY'], stop_bits=rs485_cfg['STOP_BITS'],
+            max_chunks=rs485_cfg.get('MAX_CHUNKS', 16),
             DMESG=DMESG, LOG=debug_mode
         )
     except Exception as e:
@@ -204,7 +224,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG):
 
     _log(DMESG, "Hardware initialization complete.")
 
-def run_bootstrap(app_passthrough: dict, LOG: bool = False):
+def run_bootstrap(app_passthrough: dict):
     """Performs initial system setup."""
     DMESG, SYSCONFIG = app_passthrough.get('DMESG'), app_passthrough.get('SYSCONFIG')
 
@@ -221,8 +241,8 @@ def run_bootstrap(app_passthrough: dict, LOG: bool = False):
     _log(DMESG, "Starting...", debug_mode=debug_mode)
 
     _log_system_info(DMESG)
-    _setup_identity(DMESG, SYSCONFIG, LOG, app_passthrough)
-    _initialize_hardware(DMESG, SYSCONFIG, app_passthrough, LOG)
+    _setup_identity(DMESG, SYSCONFIG, app_passthrough)
+    _initialize_hardware(DMESG, SYSCONFIG, app_passthrough)
 
     gc.collect()
     _log(DMESG, "BOOTSTRAP: Initialization Complete.", force=True)

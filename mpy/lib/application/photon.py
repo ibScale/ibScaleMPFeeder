@@ -20,12 +20,13 @@ from system.servo import RESULT_REACHED, RESULT_OVERSHOT, RESULT_STALLED, RESULT
 
 _PROTOCOL_VERSION = 1
 _UUID_LEN = 12
-_DISCOVERY_WINDOW_MS = 250  # UUID-seeded jitter window for broadcast discovery replies
+_VENDOR_OPTIONS_LEN = 20    # VENDOR_SPECIFIC_OPTIONS_LENGTH in the reference firmware
+_IDENTIFY_MS = 3000         # how long the identify flash (solid blue) is shown
 
 
 class Photon:
     def __init__(self, network, dmesg, servo, led, sysconfig, eeprom=None,
-                 node_address=0, uuid=None):
+                 node_address=255, uuid=None):
         self.net = network
         self.dmesg = dmesg
         self.servo = servo
@@ -33,13 +34,20 @@ class Photon:
         self.sysconfig = sysconfig
         self.eeprom = eeprom
         self.address = node_address & 0xFF
+        self.debug_enabled = sysconfig.get('SYSTEM.DEBUG', False)
         self._initialized = False
         self._last_move_result = pkt.RESP_OK
+        self._identify_restore = None   # color() to restore once the identify flash ends
+        self._identify_until = 0
+
+        # Photon state machine has taken over LED status duty from the boot default
+        # (purple, set by RGBLED.__init__) - yellow until CMD_INITIALIZE_FEEDER succeeds.
+        if self.led:
+            self.led.state('waiting')
 
         self.ticks_per_010mm = sysconfig.get('SYSTEM.TICKS_010MM', 22.546)
         self.slot_profile = sysconfig.get('SYSTEM.SLOT_PROFILE', 'normal')
         self.uuid_bytes = self._coerce_uuid(uuid)
-        self._discovery_delay_ms = self._discovery_delay()
 
         self._handlers = {
             pkt.CMD_GET_FEEDER_ID: self._h_get_id,
@@ -54,21 +62,15 @@ class Photon:
             pkt.CMD_UNINITIALIZED_FEEDERS_RESPOND: self._h_uninit_respond,
             pkt.CMD_VENDOR_OPTIONS: self._h_vendor,
         }
-        self._log(f"Ready - addr={self.address}, uuid={self.uuid_bytes.hex()}, "
-                  f"disc_delay={self._discovery_delay_ms}ms", force=True)
+        self._log(f"Ready - addr={self.address}, uuid={self.uuid_bytes.hex()}", force=True)
+
+    @property
+    def initialized(self):
+        return self._initialized
 
     def _log(self, msg, force=False):
-        if self.dmesg:
+        if (self.debug_enabled or force) and self.dmesg:
             self.dmesg.log(f"PHOTON: {msg}")
-
-    def _discovery_delay(self):
-        """Deterministic per-feeder reply delay (FNV-1a over the UUID), spread across
-        _DISCOVERY_WINDOW_MS, so multiple uninitialized feeders don't transmit their
-        UNINITIALIZED_FEEDERS_RESPOND replies at the same instant and collide on the bus."""
-        h = 2166136261
-        for b in self.uuid_bytes:
-            h = ((h ^ b) * 16777619) & 0xFFFFFFFF
-        return h % _DISCOVERY_WINDOW_MS
 
     def _coerce_uuid(self, uuid):
         if uuid is None:
@@ -84,10 +86,28 @@ class Photon:
 
     # --- Main-loop hook ---------------------------------------------------
 
+    def _next_packet(self):
+        """Pull the next valid packet addressed to us from the transport. The
+        transport is protocol-agnostic (raw RXIDLE bursts, one per transmission -
+        see hardware/rs485.py); validation (length/address/command/CRC) and parsing
+        belong to the protocol layer, here."""
+        chunk = self.net.read_chunk()
+        while chunk is not None:
+            valid = pkt.validate_packet(chunk, self.address,
+                                        self.dmesg.log if self.dmesg else None,
+                                        self.debug_enabled)
+            if valid:
+                parsed = pkt.parse_packet(valid)
+                if parsed:
+                    return parsed
+            chunk = self.net.read_chunk()
+        return None
+
     def update(self):
         """Drain and dispatch all pending packets. Called once per app-loop tick."""
+        self._poll_identify()
         handled = False
-        packet = self.net.read_packet()
+        packet = self._next_packet()
         while packet:
             handler = self._handlers.get(packet['cmd'])
             if handler:
@@ -96,7 +116,7 @@ class Photon:
                 except Exception as e:
                     self._log(f"Handler error (cmd={packet['cmd']:#04x}): {e}", force=True)
             handled = True
-            packet = self.net.read_packet()
+            packet = self._next_packet()
         return handled
 
     # --- Helpers ----------------------------------------------------------
@@ -120,6 +140,16 @@ class Photon:
         t = 250 + abs(ticks)         # generous upper bound; reply precedes the move
         return t if t < 65535 else 65535
 
+    def _poll_identify(self):
+        """Non-blocking: once _IDENTIFY_MS has elapsed, revert the identify flash (solid
+        blue) back to whatever color was showing before it. Checked once per tick here
+        rather than in led.py, which only exposes color()/blink() and has no timers of
+        its own."""
+        if self._identify_restore is not None and time.ticks_diff(time.ticks_ms(), self._identify_until) >= 0:
+            if self.led:
+                self.led.color(self._identify_restore)
+            self._identify_restore = None
+
     # --- Command handlers -------------------------------------------------
 
     def _h_get_id(self, packet):
@@ -128,7 +158,12 @@ class Photon:
     def _h_initialize(self, packet):
         if self._uuid_matches(packet['payload']):
             self._initialized = True
-            self._log("Initialized by host.")
+            # Re-anchor the commanded grid: the tape may have been handled/reloaded
+            # since the last move, and the first feed must not "correct" that offset.
+            self.servo.reseed()
+            if self.led:
+                self.led.state('ready')
+            self._log("Initialized by host.", force=True)
             self._reply(packet, pkt.RESP_OK, self.uuid_bytes)
         else:
             self._reply(packet, pkt.RESP_WRONG_FEEDER_ID, self.uuid_bytes)
@@ -144,7 +179,8 @@ class Photon:
 
     def _move(self, packet, forward):
         if not self._initialized:
-            self._reply(packet, pkt.RESP_UNINITIALIZED_FEEDER)
+            # Reference firmware includes the UUID in the uninitialized error reply.
+            self._reply(packet, pkt.RESP_UNINITIALIZED_FEEDER, self.uuid_bytes)
             return
         payload = packet['payload']
         if not payload:
@@ -155,30 +191,48 @@ class Photon:
         expected = self._expected_time_ms(ticks)
         # Reply OK + expected time first, then run the feed to completion (RT burst).
         self._reply(packet, pkt.RESP_OK, bytes([(expected >> 8) & 0xFF, expected & 0xFF]))
+        # Cyan while the move is running; restores whatever color() was showing before it
+        # once the move stops (if a blink is active, e.g. the console-open indicator, it
+        # keeps blinking throughout - it just follows color()).
+        prev_color = self.led.current_color if self.led else None
+        if self.led:
+            self.led.state('feeding')
         self.servo.feed(ticks if forward else -ticks, profile=self.slot_profile)
         result = self.servo.run_move()
+        if self.led:
+            self.led.color(prev_color)
         self._last_move_result = self._map_result(result)
+        if result == RESULT_STALLED or result == RESULT_TIMEOUT:
+            # Fault ends the move short and the operator will clear the jam by hand,
+            # so the commanded grid no longer means anything. Re-anchor it to the
+            # actual position: a retried feed then advances exactly one pitch instead
+            # of pitch + the missed distance (which would over-feed past the jam).
+            self.servo.reseed()
+        # Drop any packets that arrived while the move blocked (e.g. host retries) -
+        # matches the reference firmware's clearPackets() after feedDistance();
+        # processing them late could replay a MOVE and double-feed.
+        while self.net.read_chunk() is not None:
+            pass
         self._log(f"Move {'fwd' if forward else 'rev'} {tenths}/10mm ({ticks}t) -> {self.servo.result_name}")
 
     def _h_status(self, packet):
-        if not self._initialized:
-            self._reply(packet, pkt.RESP_UNINITIALIZED_FEEDER)
-            return
+        # No initialized-guard, matching the reference firmware: the stored result
+        # is returned unconditionally.
         self._reply(packet, self._last_move_result)
 
     def _h_get_address(self, packet):
         # Broadcast; reply (FROM our slot, which is how the host learns our address)
-        # only when the UUID matches so other feeders stay silent.
+        # only when the UUID matches so other feeders stay silent. Status-only reply,
+        # no payload - matching the reference firmware.
         if self._uuid_matches(packet['payload']):
             self._reply(packet, pkt.RESP_OK)
 
     def _h_identify(self, packet):
         if self._uuid_matches(packet['payload']):
             if self.led:
-                try:
-                    self.led.blink('blue', count=6)
-                except Exception:
-                    pass
+                self._identify_restore = self.led.current_color
+                self.led.state('identify')
+                self._identify_until = time.ticks_add(time.ticks_ms(), _IDENTIFY_MS)
             self._reply(packet, pkt.RESP_OK)
 
     def _h_program_floor(self, packet):
@@ -191,17 +245,17 @@ class Photon:
 
     def _h_uninit_respond(self, packet):
         if not self._initialized:
-            # Every uninitialized feeder answers this broadcast, so stagger replies by a
-            # UUID-seeded delay to avoid bus collisions (host retries cover residual ones).
-            time.sleep_ms(self._discovery_delay_ms)
+            # Immediate reply, like the reference firmware: with multiple uninitialized
+            # feeders the responses can collide, and the host's retries sort it out.
             self._reply(packet, pkt.RESP_OK, self.uuid_bytes)
 
     def _h_vendor(self, packet):
         if not self._initialized:
-            self._reply(packet, pkt.RESP_UNINITIALIZED_FEEDER)
+            self._reply(packet, pkt.RESP_UNINITIALIZED_FEEDER, self.uuid_bytes)
             return
-        # No vendor-specific options implemented; acknowledge with empty payload.
-        self._reply(packet, pkt.RESP_OK)
+        # No vendor-specific options implemented; the reference firmware replies OK
+        # with a fixed 20-byte options block (VENDOR_SPECIFIC_OPTIONS_LENGTH).
+        self._reply(packet, pkt.RESP_OK, bytes(_VENDOR_OPTIONS_LEN))
 
     # --- Address programming ----------------------------------------------
 
@@ -210,12 +264,22 @@ class Photon:
         the RS485 RX filter so the feeder answers on its new slot."""
         try:
             addr &= 0xFF
+            if addr == 0 or addr == 0xFF:
+                # Reserved: 0 is the host's bus address, 0xFF is broadcast. Refuse
+                # before anything is persisted (a 0xFF would otherwise land in the
+                # EEPROM and then fail the RS485 filter update partway through).
+                self._log(f"Refusing reserved floor address {addr}.", force=True)
+                return False
             if self.eeprom:
-                self.eeprom.write_memory(0, bytes([addr]))
+                # write_memory is verified (read-back compare); a failed persist must
+                # fail the command - otherwise the new address evaporates on reboot.
+                if not self.eeprom.write_memory(0, bytes([addr])):
+                    self._log("Address program failed: EEPROM write did not verify.", force=True)
+                    return False
             self.sysconfig.set('SYSTEM.SLOTID', addr)
             self.sysconfig.save()
-            if hasattr(self.net, 'set_slot_id'):
-                self.net.set_slot_id(addr)
+            # self.address is the RX filter (validation happens in _next_packet),
+            # so updating it re-addresses the feeder immediately.
             self.address = addr
             self._log(f"Floor address programmed to {addr}.", force=True)
             return True

@@ -7,7 +7,7 @@
 DEFAULT_SYSCONFIG = {
     "SYSTEM": {
         "UUID": None,
-        "SLOTID": 0,  # 0 = Unknown
+        "SLOTID": 255,  # 255 = Unprogrammed (answers broadcast only, like the reference firmware; 0 is the host)
         "EEPROM_PIN": "ONEWIRE",
         "EEPROM_DRIVER": "DS28E07",  # LumenPNP uses a Maxim DS28E07 by default
         "TICKS_010MM": 22.546,  # How many ticks per 0.10mm
@@ -15,6 +15,7 @@ DEFAULT_SYSCONFIG = {
         "APP": "app.py",  # What to launch after we're done here
         "WATCHDOG_S": 0,  # Hardware watchdog timeout in seconds; 0 = off. Once on it runs until reset (~32s max)
         "DEBUG": False,  # Debug levels of logging. !!! LOTS OF NOISE !!!
+        "TEMP_MAX_C": 70,  # LED turns solid red + FAULT logged if MCU temp reaches/exceeds this
     },
     "APP": {
         "LOOP_INTERVAL_MS": 20,  # Main app control loop time
@@ -24,18 +25,36 @@ DEFAULT_SYSCONFIG = {
     "ADC": {
         "VDDA": 3.3,
         "ADC_BITS": 12,
-        "VMONVDC": "VMONVDC",  # VDC input
-        "VMONSYS": "VMON10V",  # Buck output
+        "VMONVDC": "VMONVDC",  # VDC input (ADC1_IN8 / connector Pin 18) - nominal 24V
+        "VMONSYS": "VMON10V",  # Buck output (ADC1_IN9 / connector Pin 19) - nominal 10V, regulated
         "VMONSYS_RATIO": 4.0303,  # (R1+R2)/R2, I.E. R1 = 100K, R2 = 33K, so 133000/33000 = 4.0303
         "VMONVDC_RATIO": 7.6667,
+        "VDC_MIN": 20.0,  # Fault (LED red) if VDC falls below this (nominal 24V input)
+        "VDC_MAX": 28.0,  # Fault if VDC exceeds this
+        "VSYS_MIN": 9.0,  # Fault if VSYS (regulated 10V buck) falls below this
+        "VSYS_MAX": 11.0,  # Fault if VSYS exceeds this
     },
     "LED": {
-        "REDLED": 1,  # Taken from mpconfigboard.h definitions
-        "GREENLED": 2,
-        "BLUELED": 3,
+        "REDPIN": "LEDRED",  # Taken from pins.csv
+        "GREENPIN": "LEDGREEN",
+        "BLUEPIN": "LEDBLUE",
+        "TIMER_ID": 1,  # TIM1 - matches mpconfigboard.h MICROPY_HW_LEDx_PWM
+        "PWM_FREQUENCY": 1000,
+        "RED_CH": 1,
+        "GREEN_CH": 2,
+        "BLUE_CH": 3,
         "INVERT": True,  # Common Cathode
-        "ONCOLOR": "green",
-        "BLINK_TIMER": 2,  # Used for hardware blinking
+        # Status -> color policy (names from led.py COLORS or '#RRGGBB' hex). All
+        # code sets LED state by name (LED.state('fault')); re-theme it here.
+        "STATES": {
+            "boot": "#800080",
+            "waiting": "yellow",
+            "ready": "green",
+            "feeding": "cyan",
+            "identify": "blue",
+            "fault": "red",
+            "stopped": "yellow",
+        },
     },
     "DRIVES": {
         "DRIVE_INVERT": False,  # Set if the motor is spinning in the wrong direction
@@ -71,12 +90,15 @@ DEFAULT_SYSCONFIG = {
         "DATA_BITS": 8,
         "PARITY": None,
         "STOP_BITS": 1,
-        "BUFFER_SIZE": 0,  # 0 to calculate based on baud rate, for 57.6K this whould be around 2048 bytes
+        "MAX_CHUNKS": 16,  # RX queue depth (bursts); bounds buffering while a move blocks the loop
     },
     "SERVO": {
         "MAX": 80,  # Cruise drive speed; If parts get knocked around or overshoot is consistently too high, lower this
         "CREEP": 15,  # Slow terminal approach speed; Lower = more repeatable stop, too low = stall near target
         "MIN": 5,  # Lowest drive speed that still rotates the motor (floor); Raise if the feeder stalls/skips
+        "KICK": 60,  # Breakaway duty floor while an approach hasn't moved yet (overcomes stiction); 0 disables
+        "KICK_TICKS": 5,  # Travel (ticks) that counts as broken away; the kick ends the moment this is reached
+        "KICK_MS": 100,  # Kick time budget per approach; a hard jam then drops to normal duty until the stall fault
         "TOLERANCE": 15,  # Consider the move complete if we're +- this many ticks, too small causes excessive overshoots
         "TAKEUP": 200,  # Ticks to take-up for backlash when reversing
         "ACCEL_TICKS": 200,  # Ramp CREEP up to MAX over this distance at the start of a move (soft start)
@@ -86,12 +108,6 @@ DEFAULT_SYSCONFIG = {
         "STALL_MS": 300,  # Fault if the encoder makes no progress for this long while driving (jam detection)
         "STALL_EPS": 3,  # Minimum ticks of movement counted as "progress" for stall detection
         "MOVE_TIMEOUT_MS": 10000,  # Hard per-move time cap before a timeout fault (backstop)
-        "VALIDATE_PITCHES_MM": [
-            2,
-            4,
-            8,
-            12,
-        ],  # Tape pitches (mm) the auto-tuner validates against
         # Per-move speed profiles scale MAX and ACCEL_TICKS. The creep tail (CREEP/CREEP_TICKS)
         # is shared, so stop accuracy is identical across profiles - only speed/gentleness change.
         # Pick per part at the caller (gentle for light parts/shallow pockets, fast for robust ones).
@@ -102,7 +118,7 @@ DEFAULT_SYSCONFIG = {
         },
         "PEEL_ENABLE": True,  # Run the peel motor with the servo
         "PEEL_SPEED": 100,
-        "PEEL_RUN_MS": 1000,  # Minimum time for the peel motor to run to take up slack
+        "POST_PEEL_MS": 200,  # Keep the peel motor running this long after the drive move finishes
         "BRAKE": True,  # True = Brake servo to stop, False = Coast servo to stop
     },
     "BUTTONS": {

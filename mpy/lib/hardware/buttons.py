@@ -4,7 +4,7 @@
 
 # buttons.py - Manages a button state
 
-import pyb
+import machine
 import time
 
 class Button:
@@ -15,8 +15,8 @@ class Button:
         self.log_debug = LOG or (SYSCONFIG.get('SYSTEM.DEBUG', False) if SYSCONFIG else False)
 
         try:
-            self.pin = pyb.Pin(pin_name, pyb.Pin.IN,
-                               pyb.Pin.PULL_DOWN if active_high else pyb.Pin.PULL_UP)
+            self.pin = machine.Pin(pin_name, machine.Pin.IN,
+                                    machine.Pin.PULL_DOWN if active_high else machine.Pin.PULL_UP)
             self._log(f"Init '{pin_name}' (AH={active_high}, DB={debounce_ms}, DC={double_click_ms}, LP={long_press_ms})", force=True)
         except ValueError as e:
             self._log(f"ERROR - Pin '{pin_name}' init failed: {e}", force=True)
@@ -32,7 +32,19 @@ class Button:
         self.press_time = self.release_time = 0
         self.click_count = 0
         self.lp_pending = self.lp_fired = False
-        self.event = None
+        # Small event FIFO: a single slot could drop an event if two land between
+        # polls (e.g. long_press then release inside one slow loop iteration).
+        self.events = []
+
+        # If the button already reads "pressed" at construction time (e.g. held
+        # during boot, or a startup glitch), seed press_time/lp_pending as if a
+        # normal press transition had just happened. Without this, deb_state and
+        # phys_state start equal, poll()'s transition check never fires for this
+        # button, and it gets stuck reporting is_pressed()==True forever with no
+        # click/long_press/release event ever generated.
+        if self.deb_state:
+            self.press_time = self.last_change
+            self.lp_pending = True
 
     def _log(self, msg, force=False):
         if (self.log_debug or force) and self.dmesg:
@@ -40,6 +52,11 @@ class Button:
 
     def _read(self):
         return bool(self.pin.value()) == self.active_high
+
+    def _push(self, evt):
+        self.events.append(evt)
+        if len(self.events) > 4:
+            self.events.pop(0)  # nobody is consuming; keep only the newest few
 
     def poll(self):
         now = time.ticks_ms()
@@ -69,29 +86,28 @@ class Button:
                     self.lp_pending = False
                     
                     if self.lp_fired:
-                        self.event = 'release'
+                        self._push('release')
                         self.click_count = 0
                     elif self.click_count == 2:
-                        self.event = 'double_click'
+                        self._push('double_click')
                         self.click_count = 0
         
         # Long press check
         if self.deb_state and self.lp_pending and not self.lp_fired:
             if time.ticks_diff(now, self.press_time) >= self.lpress_ms:
-                self.event = 'long_press'
+                self._push('long_press')
                 self.lp_fired, self.lp_pending = True, False
                 self.click_count = 0
         
         # Single click timeout
         if not self.deb_state and self.click_count == 1:
             if time.ticks_diff(now, self.release_time) > self.dclick_ms:
-                self.event = 'click'
+                self._push('click')
                 self.click_count = 0
 
     def get_event(self):
-        evt = self.event
-        self.event = None
-        return evt
+        """Return the oldest unconsumed event (FIFO), or None."""
+        return self.events.pop(0) if self.events else None
 
     def is_pressed(self):
         return self.deb_state

@@ -56,7 +56,7 @@ def handle_keyboard_interrupt():
 
 ### Run Bootstrap
 try:
-    run_bootstrap(app_passthrough, LOG=False)
+    run_bootstrap(app_passthrough)
 except KeyboardInterrupt:
     handle_keyboard_interrupt()
 except Exception as e:
@@ -64,10 +64,9 @@ except Exception as e:
     # Attempt to signal failure via LED if it was initialized
     if 'LED' in app_passthrough:
         try:
-            app_passthrough['LED'].color('yellow')
-            app_passthrough['LED'].blink('red')
+            app_passthrough['LED'].state('fault')
         except Exception: pass
-    
+
     # Give user immediate options
     print(f"\nBOOTSTRAP FAILED: {e}")
     print("Press Ctrl+C for recovery options, or system will halt...")
@@ -94,20 +93,21 @@ DMESG.log(f"GLUON: Starting application...")
 ### a /flash/app.py copy still shadows the frozen one for development overrides.
 app_to_run = SYSCONFIG.get('SYSTEM.APP', 'app.py')
 try:
-    app_module = __import__(app_to_run[:-3])
+    # Accept 'app.py' or a bare module name ('app') in SYSTEM.APP.
+    app_module = __import__(app_to_run[:-3] if app_to_run.endswith('.py') else app_to_run)
     if hasattr(app_module, 'run_app'):
         app_module.run_app(app_passthrough)
     else:
         DMESG.log(f"ERROR: Application '{app_to_run}' has no 'run_app' function.")
-        if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
+        if 'LED' in app_passthrough: app_passthrough['LED'].state('fault')
 except KeyboardInterrupt:
     handle_keyboard_interrupt()
 except ImportError as e:
     DMESG.log(f"ERROR: Could not import application '{app_to_run}': {e}")
-    if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
+    if 'LED' in app_passthrough: app_passthrough['LED'].state('fault')
 except Exception as e:
     DMESG.log(f"ERROR: Unhandled exception during application execution: {e}")
-    if 'LED' in app_passthrough: app_passthrough['LED'].blink('red')
+    if 'LED' in app_passthrough: app_passthrough['LED'].state('fault')
 finally:
     DMESG.log("Application finished or failed.")
 

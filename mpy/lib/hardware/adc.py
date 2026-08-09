@@ -5,12 +5,12 @@
 # adc.py - ADC lookup for VDC, System, and Temperature
 
 import pyb
+import machine
 
 class ADCReader:
     def __init__(self, DMESG=None, VDDA=3.3, VMONVDC_PIN="VMONVDC", VMONSYS_PIN="VMON10V",
                  ADC_BITS=12, VMONSYS_RATIO=4.0303, VMONVDC_RATIO=7.6667, LOG=False):
         self.VDDA = VDDA
-        self.max_val = (1 << ADC_BITS) - 1
         self.LOG, self.DMESG = LOG, DMESG
         self._vdc_ratio = VMONVDC_RATIO
         self._sys_ratio = VMONSYS_RATIO
@@ -18,9 +18,13 @@ class ADCReader:
 
         try:
             self.adcs = [
-                pyb.ADC(pyb.Pin(VMONVDC_PIN)),
-                pyb.ADC(pyb.Pin(VMONSYS_PIN)),
-                pyb.ADCAll(ADC_BITS),
+                machine.ADC(VMONVDC_PIN),
+                machine.ADC(VMONSYS_PIN),
+                # Mask 0x70000 = internal channels only (16 temp, 17 vref, 18 vbat).
+                # The default mask (0xffffffff) would reconfigure EVERY ADC-capable
+                # pin (PA0-7, PB0-1, PC0-5) to analog - clobbering RS485 DE/TX/RX
+                # and the SPI-flash pins in that build variant.
+                pyb.ADCAll(ADC_BITS, 0x70000),
             ]
             self._log(f"Init - Bits:{ADC_BITS}, VDDA:{VDDA}, VDC:{VMONVDC_PIN}({VMONVDC_RATIO}x)={self.vmonvdc():.2f}V, VSYS:{VMONSYS_PIN}({VMONSYS_RATIO}x)={self.vmonsys():.2f}V", force=True)
         except Exception as e:
@@ -35,7 +39,7 @@ class ADCReader:
         if idx >= len(self.adcs):
             return None
         try:
-            return self.adcs[idx].read() * self.VDDA / self.max_val * ratio
+            return self.adcs[idx].read_u16() * self.VDDA / 65535 * ratio
         except Exception:
             return None
 

@@ -63,34 +63,7 @@ class EEPROM:
     def read_memory(self, addr, length):
         """Read from EEPROM memory."""
         return self._driver.read_memory(addr, length)
-    
+
     def write_memory(self, addr, data):
         """Write to EEPROM memory."""
         return self._driver.write_memory(addr, data)
-    
-    # Optional methods (driver-dependent)
-    def read_serial_number(self):
-        """Read device serial number (if supported)."""
-        if hasattr(self._driver, 'read_serial_number'):
-            return self._driver.read_serial_number()
-        return None
-    
-    def get_device_info(self):
-        """Get device information (if supported)."""
-        if hasattr(self._driver, 'get_device_info'):
-            return self._driver.get_device_info()
-        return None
-    
-    # Delegate any other method calls to the driver
-    def __getattr__(self, name):
-        """Delegate unknown method calls to the driver."""
-        # Guard against infinite recursion if _driver was never set (failed load):
-        # accessing self._driver would re-enter __getattr__ for '_driver' forever.
-        if name == '_driver':
-            raise AttributeError(name)
-        return getattr(self._driver, name)
-    
-    @property
-    def driver(self):
-        """Get the underlying driver instance."""
-        return self._driver

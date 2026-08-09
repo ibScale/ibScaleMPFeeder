@@ -59,18 +59,23 @@ RESP_UNKNOWN = 0xFF
 
 @micropython.viper
 def calcCRC8(data_ptr: ptr8, length: int) -> int:
-    """Calculate 8-bit CRC checksum."""
+    """CRC-8, polynomial 0x07 (x^8+x^2+x+1), MSB-first, init 0 - bit-identical to
+    the CRC8_107 used by the reference Photon firmware (jnesselr/RS485 library).
+    Check value: calcCRC8(b'123456789') == 0xF4."""
     crc = 0
     for i in range(length):
-        byte = int(data_ptr[i])
-        crc ^= (byte << 8)
+        crc ^= int(data_ptr[i])
         for _ in range(8):
-            crc = (crc << 1) ^ (0x1070 << 3) if (crc & 0x8000) else crc << 1
-    return ((crc >> 8) & 0xFF)
+            if crc & 0x80:
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
 
-@micropython.native
 def validate_packet(data: bytes, node_slot_id: int, logger=None, log_debug: bool = False) -> bytes | None:
-    """Validate raw data against Photon protocol rules."""
+    """Validate raw data against Photon protocol rules. Deliberately NOT native:
+    it runs a few times per second at most, and native code costs 2-4x the flash
+    of bytecode - only calcCRC8 (per-byte work) is worth emitter treatment here."""
     
     def _log(msg: str, debug: bool = False):
         if logger and (not debug or log_debug):

@@ -96,10 +96,10 @@ def run_calibrate(app_passthrough):
             print(f"Initial spin at 100% for {INITIAL_SPIN_DURATION_MS}ms...")
             DRIVES.drive_set(100, absolute_pwm=True)
             ENCODER.update()
-            initial_start_count = ENCODER.count
+            initial_start_count = ENCODER.absolute_count
             time.sleep_ms(INITIAL_SPIN_DURATION_MS)
             ENCODER.update()
-            initial_end_count = ENCODER.count
+            initial_end_count = ENCODER.absolute_count
 
             if initial_start_count == initial_end_count:
                 print("ERROR: Encoder count did not change during initial spin. Motor not moving or encoder issue.")
@@ -119,10 +119,10 @@ def run_calibrate(app_passthrough):
                     DRIVES.drive_set(current_pwm, absolute_pwm=True)
                     time.sleep_ms(50) # Allow PWM to settle briefly
                     ENCODER.update()
-                    start_count = ENCODER.count
+                    start_count = ENCODER.absolute_count
                     time.sleep_ms(CALIBRATION_INTERVAL_MS)
                     ENCODER.update()
-                    end_count = ENCODER.count
+                    end_count = ENCODER.absolute_count
 
                     if start_count == end_count:
                         print(f"Movement stopped at or below {current_pwm}% PWM.")
@@ -148,10 +148,10 @@ def run_calibrate(app_passthrough):
                         DRIVES.drive_set(current_pwm, absolute_pwm=True)
                         time.sleep_ms(50) # Allow PWM to settle briefly
                         ENCODER.update()
-                        start_count = ENCODER.count
+                        start_count = ENCODER.absolute_count
                         time.sleep_ms(CALIBRATION_INTERVAL_MS)
                         ENCODER.update()
-                        end_count = ENCODER.count
+                        end_count = ENCODER.absolute_count
 
                         if start_count != end_count:
                             print(f"Movement restarted at {current_pwm}% PWM.")
@@ -247,7 +247,7 @@ def run_calibrate(app_passthrough):
 
             print("Commanding motor to coast (PWM 0%, no brake). Measuring coasting ticks...")
             ENCODER.update()
-            encoder_at_stop_command = ENCODER.count
+            encoder_at_stop_command = ENCODER.absolute_count
             # Coast (brake=False) so we measure the natural runway; the servo's
             # auto_brake default would otherwise brake and skew the measurement.
             DRIVES.drive_set(0, absolute_pwm=True, brake=False)
@@ -263,7 +263,7 @@ def run_calibrate(app_passthrough):
                 wdt_feed()
                 time.sleep_ms(CALIBRATION_INTERVAL_MS)
                 ENCODER.update()
-                current_encoder_count_coasting = ENCODER.count
+                current_encoder_count_coasting = ENCODER.absolute_count
                 print(f"Coasting check: Current count {current_encoder_count_coasting}, Last count {last_encoder_count_coasting}")
 
                 if current_encoder_count_coasting == last_encoder_count_coasting:
