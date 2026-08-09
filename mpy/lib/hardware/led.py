@@ -103,11 +103,19 @@ class RGBLED:
 
     def __init__(self, DMESG=None, REDPIN='LEDRED', GREENPIN='LEDGREEN', BLUEPIN='LEDBLUE',
                  TIMER_ID=1, PWM_FREQUENCY=1000, RED_CH=1, GREEN_CH=2, BLUE_CH=3,
-                 INVERT=False, STATES=None, LOG=False):
+                 INVERT=False, CHANNEL_COLORS=None, STATES=None, LOG=False):
         self.DMESG, self.LOG, self.invert = DMESG, LOG, INVERT
         self._states = dict(_DEFAULT_STATES)
         if STATES:
             self._states.update(STATES)
+        # Physical channel index (0=RED_CH, 1=GREEN_CH, 2=BLUE_CH) -> the color it
+        # actually emits. Defaults to the pin names being trustworthy; calibration
+        # (console -> option 1) overwrites this via set_channel_map() once the real
+        # wiring on a given board is known.
+        if CHANNEL_COLORS and sorted(CHANNEL_COLORS) == ['B', 'G', 'R']:
+            self._channel_map = list(CHANNEL_COLORS)
+        else:
+            self._channel_map = ['R', 'G', 'B']
         self.ch = None
         self.period = 0
         self._current = 'off'
@@ -138,15 +146,16 @@ class RGBLED:
             self.DMESG.log(f"LED: {msg}")
 
     def _set(self, rgb):
-        """Write an (r, g, b) tuple to the channels."""
+        """Write an (r, g, b) tuple to the channels, routed through the channel map
+        (physical channel index -> color it actually emits; see CHANNEL_COLORS)."""
         if self.ch:
             r, g, b = rgb
             if self.invert:
                 r, g, b = 255 - r, 255 - g, 255 - b
             period = self.period
-            self.ch[0].pulse_width(r * period // 255)
-            self.ch[1].pulse_width(g * period // 255)
-            self.ch[2].pulse_width(b * period // 255)
+            values = {'R': r, 'G': g, 'B': b}
+            for i, color in enumerate(self._channel_map):
+                self.ch[i].pulse_width(values[color] * period // 255)
 
     def color(self, name):
         """Set the solid/resting color, by name (see COLORS) or as a HEX/HTML color
@@ -197,6 +206,32 @@ class RGBLED:
         self._next_tick = time.ticks_add(self._next_tick, self._interval_ms)
         self._blink_on = not self._blink_on
         self._set(_resolve(self._current) or (0, 0, 0) if self._blink_on else (0, 0, 0))
+
+    def set_invert(self, invert):
+        """Override the common-anode/common-cathode polarity flag. Used by calibration
+        once the real polarity has been confirmed against the physical LED."""
+        self.invert = bool(invert)
+
+    def set_channel_map(self, mapping):
+        """Override the physical-channel-index -> color map (see CHANNEL_COLORS). Used
+        by calibration once the real per-channel wiring has been confirmed."""
+        self._channel_map = list(mapping)
+
+    def probe(self, index=None):
+        """Drive physical channel `index` (0=RED_CH, 1=GREEN_CH, 2=BLUE_CH) to its 'on'
+        level for the current invert setting, all other channels 'off'; index=None
+        drives every channel 'off'. Bypasses color()/the channel map entirely - for
+        calibration to identify raw wiring (polarity, and which channel lights which
+        color) before either is known or trusted."""
+        if not self.ch:
+            return
+        self._blinking = False
+        on_level = 0 if self.invert else 255
+        off_level = 255 if self.invert else 0
+        period = self.period
+        for i, ch in enumerate(self.ch):
+            level = on_level if i == index else off_level
+            ch.pulse_width(level * period // 255)
 
     def test(self, delay_ms=150):
         """Cycle through the palette for a visual check (blocking)."""

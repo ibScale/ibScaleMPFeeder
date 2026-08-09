@@ -27,6 +27,7 @@ def run_calibrate(app_passthrough):
     PEEL_SPEED_PERCENT = 75 # Peel motor test speed
     COAST_TEST_FULL_SPEED_DURATION_MS = 2000 # Run at full speed for 2s before coast test
     COAST_TEST_STOP_CHECK_INTERVALS = 3 # Number of CALIBRATION_INTERVAL_MS to confirm stop
+    BUTTON_GESTURE_TIMEOUT_S = 10 # How long to wait for each requested button gesture
 
     # --- Get Objects from Passthrough ---
     DRIVES = app_passthrough.get('DRIVES')
@@ -34,6 +35,8 @@ def run_calibrate(app_passthrough):
     DMESG = app_passthrough.get('DMESG')
     SYSCONFIG = app_passthrough.get('SYSCONFIG')
     LED = app_passthrough.get('LED')
+    BTNUP = app_passthrough.get('BTNUP')
+    BTNDOWN = app_passthrough.get('BTNDOWN')
 
     # --- Safety Checks ---
     if not all([DRIVES, ENCODER, DMESG, SYSCONFIG]): # Check for SYSCONFIG too
@@ -44,9 +47,9 @@ def run_calibrate(app_passthrough):
     log = DMESG.log
 
     # --- Helper for Confirmation/Input ---
-    def get_input(prompt_message, timeout_s):
+    def get_input(prompt_message, timeout_s, hint='Y/N'):
         # Use print for user-facing prompt
-        print(f"{prompt_message} (Y/N - {timeout_s}s timeout): ", end='')
+        print(f"{prompt_message} ({hint} - {timeout_s}s timeout): ", end='')
         poller = select.poll()
         poller.register(sys.stdin, select.POLLIN)
         # Poll in short chunks so the watchdog (if armed) gets fed during a long wait.
@@ -60,6 +63,24 @@ def run_calibrate(app_passthrough):
         print("Timeout")
         return None
 
+    def wait_for_button_event(btn, expected, timeout_s):
+        """Poll `btn` until it reports the `expected` event ('click'/'double_click'/
+        'long_press'), ignoring any other event that lands while waiting. Returns
+        False after timeout_s with no match."""
+        while btn.get_event() is not None:
+            pass  # drain anything stale queued from before this gesture was asked for
+        deadline = time.ticks_add(time.ticks_ms(), timeout_s * 1000)
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            wdt_feed()
+            btn.poll()
+            evt = btn.get_event()
+            while evt is not None:            # drain every event queued this tick
+                if evt == expected:
+                    return True
+                evt = btn.get_event()
+            time.sleep_ms(20)
+        return False
+
     # --- Ask for Test Confirmations ---
     print("--- Calibration Selection ---")
     encoder_confirm = get_input(f"Run DRIVE PWM Minimum Calibration test?", CONFIRM_TIMEOUT_S)
@@ -68,11 +89,14 @@ def run_calibrate(app_passthrough):
     peel_confirm = get_input(f"Run PEEL motor direction test ({PEEL_SPEED_PERCENT}%)?", CONFIRM_TIMEOUT_S)
     run_peel_test = peel_confirm == 'Y'
 
-    led_confirm = get_input(f"Run RGB LED test?", CONFIRM_TIMEOUT_S)
-    run_led_test = led_confirm == 'Y'
+    button_confirm = get_input("Run button test (guided click/double-click/long-press)?", CONFIRM_TIMEOUT_S)
+    run_button_test = button_confirm == 'Y'
+
+    led_confirm = get_input("Calibrate the LED (polarity + channel colors)?", CONFIRM_TIMEOUT_S)
+    run_led_calib = led_confirm == 'Y'
 
     # Update exit condition
-    if not run_encoder_calib_test and not run_peel_test and not run_led_test:
+    if not run_encoder_calib_test and not run_peel_test and not run_button_test and not run_led_calib:
         print("No tests selected. Exiting calibration script.")
         print("--- Calibration Script Finished ---")
         return
@@ -332,18 +356,84 @@ def run_calibrate(app_passthrough):
 
             print("--- Peel Motor Test Finished ---")
 
-        # --- Run LED Test ---
-        if run_led_test:
-            print(f"--- Starting RGB LED Test ---")
-            if hasattr(LED, 'test'):
-                try:
-                    LED.test()
-                    print("LED test sequence complete.")
-                except Exception as led_e:
-                    print(f"ERROR during LED test: {led_e}")
+        # --- Run Button Test (guided click / double-click / long-press) ---
+        if run_button_test:
+            print(f"--- Starting Button Test ---")
+            if not all([BTNUP, BTNDOWN]):
+                print("ERROR: Missing required Button objects (BTNUP, BTNDOWN) in app_passthrough.")
             else:
-                print("ERROR: LED object does not have a 'test' method.")
-            print("--- LED Test Finished ---")
+                gestures = (('single click', 'click'), ('double click', 'double_click'), ('long press', 'long_press'))
+                for name, btn in (('UP', BTNUP), ('DOWN', BTNDOWN)):
+                    for label, expected in gestures:
+                        print(f"Press the {name} button: {label} ({BUTTON_GESTURE_TIMEOUT_S}s timeout)...")
+                        ok = wait_for_button_event(btn, expected, BUTTON_GESTURE_TIMEOUT_S)
+                        result = "OK" if ok else "TIMEOUT - no matching event detected"
+                        print(f"  {name} {label}: {result}")
+                        log(f"CALIBRATE: Button {name} {label}: {result}")
+            print("--- Button Test Finished ---")
+
+        # --- Run LED Calibration (polarity + which channel lights which color) ---
+        if run_led_calib:
+            print(f"--- Starting LED Calibration ---")
+            if not hasattr(LED, 'probe'):
+                print("ERROR: LED object does not support wiring calibration (no 'probe' method).")
+            else:
+                try:
+                    COLOR_NAMES = {'R': 'RED', 'G': 'GREEN', 'B': 'BLUE'}
+
+                    def ask_color(prompt, choices):
+                        hint = '/'.join(COLOR_NAMES[c] for c in choices)
+                        ans = get_input(prompt, DIRECTION_TIMEOUT_S, hint=hint)
+                        if ans:
+                            for c in choices:
+                                if ans == c or ans == COLOR_NAMES[c]:
+                                    return c
+                        return None
+
+                    # 1. Polarity: drive raw PWM 0 on every channel and ask if the LED is off.
+                    #    If it's still lit, 0 duty means "on" electrically (common anode),
+                    #    so INVERT must be True to make 0 mean off.
+                    LED.set_invert(False)
+                    LED.probe(None)
+                    off_confirm = get_input("LED driven to raw-zero on all channels - is it OFF?", CONFIRM_TIMEOUT_S)
+                    found_invert = (off_confirm == 'N')
+                    LED.set_invert(found_invert)
+                    LED.probe(None)  # re-assert off using the now-correct polarity
+                    print(f"LED polarity: {'Common Cathode (INVERT=True)' if found_invert else 'Common Anode (INVERT=False)'}")
+
+                    # 2. Identify which physical channel (RED_CH pin, then GREEN_CH pin) lights
+                    #    which color. The third (BLUE_CH pin) is deduced - whatever's left.
+                    remaining = ['R', 'G', 'B']
+                    channel_map = [None, None, None]
+                    aborted = False
+                    for idx in (0, 1):
+                        LED.probe(idx)
+                        color = ask_color(f"Channel {idx} is lit - is it RED, GREEN, or BLUE?", remaining)
+                        if color is None:
+                            print(f"No valid color reported for channel {idx}; aborting wiring calibration.")
+                            aborted = True
+                            break
+                        channel_map[idx] = color
+                        remaining.remove(color)
+
+                    if aborted:
+                        LED.probe(None)
+                    else:
+                        channel_map[2] = remaining[0]
+                        LED.probe(2)
+                        print(f"Channel 2 is lit - deduced as {COLOR_NAMES[channel_map[2]]} (the only color left).")
+                        LED.set_channel_map(channel_map)
+
+                        print(f"LED channel map (0=RED_CH pin, 1=GREEN_CH pin, 2=BLUE_CH pin): {channel_map}")
+                        SYSCONFIG.set('LED.INVERT', found_invert)
+                        SYSCONFIG.set('LED.CHANNEL_COLORS', channel_map)
+                        config_changed = True
+
+                        print("LED wiring calibration complete - cycling through colors (500ms/color) to confirm...")
+                        LED.test(delay_ms=500)
+                except Exception as wiring_e:
+                    print(f"ERROR during LED calibration: {wiring_e}")
+            print("--- LED Calibration Finished ---")
 
 
     except Exception as e:
@@ -374,7 +464,7 @@ def run_calibrate(app_passthrough):
                      print("Drives already disabled.")
 
             # Give feedback
-            log(f"CALIBRATE: Results - Drive/Encoder/Peel Invert: {SYSCONFIG.get('DRIVES.DRIVE_INVERT', False)}/{SYSCONFIG.get('ENCODER.INVERT', False)}/{SYSCONFIG.get('DRIVES.PEEL_INVERT', False)}, Drive PWM Min: {SYSCONFIG.get('DRIVES.DRIVE_PWM_MIN')}, Servo Decel/Creep ticks: {SYSCONFIG.get('SERVO.DECEL_TICKS')}/{SYSCONFIG.get('SERVO.CREEP_TICKS')}")
+            log(f"CALIBRATE: Results - Drive/Encoder/Peel Invert: {SYSCONFIG.get('DRIVES.DRIVE_INVERT', False)}/{SYSCONFIG.get('ENCODER.INVERT', False)}/{SYSCONFIG.get('DRIVES.PEEL_INVERT', False)}, Drive PWM Min: {SYSCONFIG.get('DRIVES.DRIVE_PWM_MIN')}, Servo Decel/Creep ticks: {SYSCONFIG.get('SERVO.DECEL_TICKS')}/{SYSCONFIG.get('SERVO.CREEP_TICKS')}, LED Invert/ChannelColors: {SYSCONFIG.get('LED.INVERT')}/{SYSCONFIG.get('LED.CHANNEL_COLORS')}")
 
             if config_changed:
                 print("Saving updated SYSCONFIG...")

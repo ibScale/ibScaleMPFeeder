@@ -1,17 +1,17 @@
-# SPDX-License-Identifier: GPL-3.0 
+# SPDX-License-Identifier: GPL-3.0
 # Copyright (C) 2025 FexTel, Inc. <info@ibscale.com>
 # Author: James Pearson <jamesp@ibscale.com>
 #
-# main.py - Gluon firmware (Photon gives you light, Gluon gives you color)
+# main.py - Gluon firmware for LumenPNP
 #
-# Gluon is a re-implementation of the Photon feeder software used in the LumenPNP.
+# Gluon is a re-implementation of the LumenPNP photon-based feeder software.
 # It's designed to run on the ibScaleMPFeeder motherboard that is physically
 # compatible with the stock LumenPNP Feeder body and Photon protocol.
 
 import asyncio
 import machine
 from system.dmesg import DmesgLogger
-import gc
+from system.gcutil import collect as gc_collect
 from system.sysconfig import SysConfig
 from system.bootstrap import run_bootstrap
 import time
@@ -28,15 +28,14 @@ app_passthrough['SYSCONFIG'] = SYSCONFIG
 ### Some shortcuts for the REPL and keyboard interrupt handler
 def dfu(): # Enter DFU Bootloader
     machine.bootloader()
+def reboot(): # Soft reboot
+    machine.soft_reset()
 def calibrate():
     from util.misc import calibrate_test
     calibrate_test(app_passthrough)
 def profiler():
     from util.misc import profiler_test
     profiler_test(app_passthrough)
-def clicky():
-    from util.misc import clicky_test
-    clicky_test(app_passthrough)
 
 def handle_keyboard_interrupt():
     """Ctrl+C during boot launches the serial console - the single system menu.
@@ -84,7 +83,7 @@ if mcu_total:
 else:
     DMESG.log("RAM: Could not read memory info")
 
-gc.collect()
+gc_collect()
 DMESG.log(f"GLUON: Starting application...")
 
 
@@ -110,4 +109,3 @@ except Exception as e:
     if 'LED' in app_passthrough: app_passthrough['LED'].state('fault')
 finally:
     DMESG.log("Application finished or failed.")
-

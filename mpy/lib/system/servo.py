@@ -8,12 +8,158 @@
 # a feedforward velocity profile (distance -> speed) drives the move, the last
 # stretch is held at a slow constant CREEP speed, and the motor brakes the instant
 # the encoder crosses the target. Final accuracy therefore depends on a repeatable
-# slow stop rather than on tuned PID gains.
+# slow stop rather than on tuned PID gains. There is no integrator anywhere in this
+# file: the commanded duty each tick is a pure function of the current (remaining,
+# traveled) ticks, recomputed from scratch every call - nothing accumulates, so
+# there's no windup and no persistent velocity/acceleration state to get out of sync
+# with reality.
 #
 # The final approach is always FORWARD so gear/sprocket backlash is taken up the
 # same way every time. A reverse request first backs off past the target (two-phase),
 # then approaches forward. A stall/timeout watchdog turns a jam into a reported fault
 # instead of driving indefinitely.
+#
+# --- State machine -----------------------------------------------------------
+#
+#   IDLE --set_target(fwd)--> APPROACH --in tolerance--> SETTLE --stable_updates
+#    ^                           |   ^                     |  |   consecutive
+#    |                       overshoot \___drifted short___/  |   in-tolerance
+#    |                           |          (re-approach)     |   samples
+#    |                           v                             v
+#    +----------------------- FAULT <--stall/timeout------ (REACHED/OVERSHOT)
+#    ^
+#    |
+#   IDLE --set_target(rev)--> BACKOFF --reached backoff point--> APPROACH (as above)
+#
+# BACKOFF only exists for a reverse request (target behind the current position);
+# every move that actually reaches SETTLE does so travelling forward. FAULT is
+# terminal for the move (drives brake, result latches STALLED/TIMEOUT); the next
+# set_target()/feed() is what clears it back to APPROACH or BACKOFF.
+#
+# --- Velocity profile math (_forward_speed) -----------------------------------
+#
+# Duty is the MIN of two independently-computed curves, each a function of a
+# different coordinate - how far is left to go, and how far has already been
+# travelled - so a short move (never reaches cruise) and the start of a long move
+# (still accelerating) both fall out of the same formula with no special-casing:
+#
+#   remaining-based curve (decel ramp + creep tail), f = fraction of decel zone left:
+#     remaining <= creep_ticks                        -> v = creep_output
+#     creep_ticks < remaining <= creep_ticks+decel_ticks:
+#         f = (remaining - creep_ticks) / decel_ticks       # 1.0 -> 0.0 as it nears creep
+#         v = creep_output + (active_max - creep_output) * f
+#     remaining > creep_ticks+decel_ticks              -> v = active_max   (cruise)
+#
+#   traveled-based curve (accel cap), same shape mirrored on distance travelled:
+#     traveled < active_accel:
+#         cap = creep_output + (active_max - creep_output) * (traveled / active_accel)
+#         v = min(v, cap)
+#
+#   duty = max(min(v_above, kick floor below), min_output)
+#
+# Both curves are straight lines in TICKS, not time - so the resulting trapezoid
+# (ramp up over accel_ticks, cruise at active_max if the move is long enough, ramp
+# down over decel_ticks, hold creep_output for the final creep_ticks) has a shape
+# fixed by distance regardless of how fast or slow the sweep actually runs; there's
+# no clock in this part of the math at all. active_max/active_accel come from the
+# move's speed profile (gentle/normal/fast - see _resolve_profile): they scale peak
+# speed and accel aggression, but creep_output/creep_ticks are never scaled, so stop
+# accuracy is identical across profiles - only throughput and how hard the part gets
+# thrown around in transit change.
+#
+# Breakaway kick: stiction can hold the motor at rest right at the soft-start duty,
+# and the accel-cap curve above only escalates with travelled distance - so a stuck
+# rotor never accelerates and the move stalls immediately. Until the approach has
+# physically moved kick_ticks, the duty floor is raised to kick_output (only when
+# the profile's own v is lower - it's a floor, not an override), and only within the
+# first kick_ms of the approach - after that a genuine jam falls back to normal duty
+# and lets the stall watchdog fault it, instead of holding kick torque into a jam.
+#
+# Finally min_output is a hard floor under everything: below it the motor is known
+# not to turn at all (see console Calibrate's PWM-minimum test, DRIVES.DRIVE_PWM_MIN),
+# so no computed duty is ever allowed to command less than that regardless of how
+# close to creep/target the move is.
+#
+# _reverse_speed() (the BACKOFF phase) is the same remaining-based curve with no
+# accel cap and no kick - precision doesn't matter for backing off to a start point,
+# only for the forward approach that follows it.
+#
+# --- Backlash takeup (reverse moves) ------------------------------------------
+#
+# A reverse request (target behind commanded_position) never approaches the target
+# from behind. Instead it backs off to:
+#     backoff_point = target - (backlash_takeup + creep_ticks + decel_ticks)
+# then runs a normal forward approach from there. backlash_takeup is slack to pull
+# the gear train's backlash out in a consistent direction before the accuracy-
+# critical part of the move even starts; the +creep_ticks+decel_ticks on top of
+# that gives the forward approach a full profile's worth of runway so it always
+# decelerates into the same creep tail as a forward-only move would, rather than
+# starting already inside the creep zone. Net effect: every stop, forward or
+# reverse request, is mechanically identical - approached forward, same ramp shape,
+# same backlash state - which is the entire reason positioning is repeatable
+# without a position-error control loop.
+#
+# --- Settling and stop confirmation (SETTLE) ----------------------------------
+#
+# Crossing into tolerance during APPROACH brakes immediately and moves to SETTLE -
+# it does not yet declare success. Momentum/backlash/encoder jitter can make the
+# position wobble for a sample or two right after the brake engages, so SETTLE
+# requires stable_updates *consecutive* in-tolerance samples (default 3) before
+# latching RESULT_REACHED - one noisy sample can't confirm (or spuriously fail) a
+# stop. If it drifts back out of tolerance short of the target, that's handled as a
+# fresh (small) forward approach - never a reverse nudge, for the same backlash
+# reason as above - complete with its own kick window, since the motor is starting
+# from rest again and stiction doesn't care how small the remaining move is. If it
+# drifts past the target instead, there is nowhere to go without reversing, so the
+# move simply finishes OVERSHOT; see "cumulative grid" below for why that's fine.
+#
+# --- Fault detection (_check_faults) -------------------------------------------
+#
+# Two independent watchdogs, both re-armed at the start of every move:
+#   stall  - checked only while actively driving (BACKOFF/APPROACH): if the encoder
+#            hasn't moved at least stall_eps ticks within the last stall_ms, the
+#            move is a jam, not just slow. Progress resets the window; it isn't a
+#            single fixed deadline.
+#   timeout - a wall-clock cap on total move duration, checked in every active
+#             state including SETTLE (a stall watchdog alone wouldn't catch a move
+#             that's technically progressing but pathologically slow). set_target's
+#             timeout_ms overrides MOVE_TIMEOUT_MS for that one move; 0 disables the
+#             cap entirely (stall detection still applies) - used for the open-ended
+#             hold-to-feed jog, which is bounded by button release instead of time.
+#
+# --- Cumulative commanded grid (feed / reseed) ----------------------------------
+#
+# feed(distance) advances and targets commanded_position (an absolute running
+# total), not actual_position + distance. So if a move overshoots by e ticks, the
+# *next* feed's target is unchanged - it's still the ideal grid - which means that
+# next move only has to cover (nominal_distance - e) ticks to land back on grid.
+# Error from one move is absorbed by the next rather than compounding across a
+# whole reel, so average pocket spacing stays exact even though any single stop can
+# be off by up to tolerance. reseed() deliberately breaks that link by re-anchoring
+# commanded_position to wherever the encoder actually is right now - used after
+# INITIALIZE_FEEDER, after a FAULT (the real stopping point is unknown/manual), or
+# after any other manual repositioning - so the servo doesn't spend several moves
+# "correcting" a gap that was never a real positioning error.
+#
+# --- Real-time execution (run_move) ---------------------------------------------
+#
+# run_move() spins update() in a tight blocking loop instead of relying on the
+# ~20ms async main-loop cadence, specifically so the SETTLE-phase tolerance check
+# stays fine-grained: at typical feed speeds the motor can cover many ticks in
+# 20ms, easily overshooting a ~15-tick tolerance band between two checks if update()
+# only ran at the main loop's rate. Sub-millisecond polling keeps ticks-per-control-
+# cycle far below tolerance, so the encoder-crosses-target brake is effectively
+# instantaneous relative to the tolerance window. This blocks the caller for the
+# move's duration (that's the tradeoff): RS485 RX and the USB FIFO keep buffering
+# under IRQ during the burst, so nothing is lost - packets are just processed once
+# the move (and any caller-side backstop in max_ms) completes.
+#
+# drives.drive_set(0) with DRIVES.auto_brake (this Servo's `brake` init arg) issues
+# an active brake (both half-bridges high, shorting the motor) rather than a coast.
+# That's what makes "stop the instant the encoder crosses the target" actually mean
+# something: a coasting motor bleeds off momentum over an unpredictable, load- and
+# voltage-dependent distance, which would reintroduce exactly the kind of variance
+# this whole feedforward-profile-plus-slow-stop design exists to avoid.
 
 import time
 import micropython

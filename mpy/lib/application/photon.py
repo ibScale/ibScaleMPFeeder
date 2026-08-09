@@ -21,7 +21,8 @@ from system.servo import RESULT_REACHED, RESULT_OVERSHOT, RESULT_STALLED, RESULT
 _PROTOCOL_VERSION = 1
 _UUID_LEN = 12
 _VENDOR_OPTIONS_LEN = 20    # VENDOR_SPECIFIC_OPTIONS_LENGTH in the reference firmware
-_IDENTIFY_MS = 3000         # how long the identify flash (solid blue) is shown
+_IDENTIFY_MS = 5000         # how long the identify flash (blinking blue) is shown
+_IDENTIFY_BLINK_MS = 500    # blink interval during the identify flash
 
 
 class Photon:
@@ -46,7 +47,7 @@ class Photon:
             self.led.state('waiting')
 
         self.ticks_per_010mm = sysconfig.get('SYSTEM.TICKS_010MM', 22.546)
-        self.slot_profile = sysconfig.get('SYSTEM.SLOT_PROFILE', 'normal')
+        self.slot_profile = sysconfig.get('APP.SLOT_PROFILE', 'normal')
         self.uuid_bytes = self._coerce_uuid(uuid)
 
         self._handlers = {
@@ -141,12 +142,13 @@ class Photon:
         return t if t < 65535 else 65535
 
     def _poll_identify(self):
-        """Non-blocking: once _IDENTIFY_MS has elapsed, revert the identify flash (solid
-        blue) back to whatever color was showing before it. Checked once per tick here
+        """Non-blocking: once _IDENTIFY_MS has elapsed, stop the identify blink and
+        revert to whatever color was showing before it. Checked once per tick here
         rather than in led.py, which only exposes color()/blink() and has no timers of
         its own."""
         if self._identify_restore is not None and time.ticks_diff(time.ticks_ms(), self._identify_until) >= 0:
             if self.led:
+                self.led.blink(0)
                 self.led.color(self._identify_restore)
             self._identify_restore = None
 
@@ -232,6 +234,7 @@ class Photon:
             if self.led:
                 self._identify_restore = self.led.current_color
                 self.led.state('identify')
+                self.led.blink(_IDENTIFY_BLINK_MS)
                 self._identify_until = time.ticks_add(time.ticks_ms(), _IDENTIFY_MS)
             self._reply(packet, pkt.RESP_OK)
 
@@ -276,7 +279,7 @@ class Photon:
                 if not self.eeprom.write_memory(0, bytes([addr])):
                     self._log("Address program failed: EEPROM write did not verify.", force=True)
                     return False
-            self.sysconfig.set('SYSTEM.SLOTID', addr)
+            self.sysconfig.set('SYSTEM.SLOT_ID', addr)
             self.sysconfig.save()
             # self.address is the RX filter (validation happens in _next_packet),
             # so updating it re-addresses the feeder immediately.

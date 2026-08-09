@@ -14,6 +14,7 @@
 import time
 import asyncio
 import os
+import sys
 import machine
 import micropython
 import pyb
@@ -108,7 +109,7 @@ class SerialConsole:
                 pass
 
         if self.sysconfig:
-            parts.append(f"slot={self.sysconfig.get('SYSTEM.SLOTID', '?')}")
+            parts.append(f"slot={self.sysconfig.get('SYSTEM.SLOT_ID', '?')}")
 
         self.vcp.write((' '.join(parts) + "\r\n").encode())
 
@@ -149,7 +150,7 @@ class SerialConsole:
 
     def _banner(self):
         uuid = self.sysconfig.get('SYSTEM.UUID', '?') if self.sysconfig else '?'
-        slot = self.sysconfig.get('SYSTEM.SLOTID', '?') if self.sysconfig else '?'
+        slot = self.sysconfig.get('SYSTEM.SLOT_ID', '?') if self.sysconfig else '?'
         self._write("\r\n\r\n=== ibScale MP Feeder Console ===\r\n")
         self._write(f"UUID: {uuid}  Slot: {slot}\r\n")
 
@@ -160,12 +161,12 @@ class SerialConsole:
             "  2) Run servo auto-tune\r\n"
             "  3) SysConfig\r\n"
             "  4) Show dmesg log\r\n"
-            "  5) Button test\r\n"
-            "  6) Status\r\n"
+            "  5) Status\r\n"
+            "  P) Program Feeder Floor (Slot ID)\r\n"
             "  R) Drop to REPL\r\n"
             "  B) Reboot (soft)\r\n"
             "  H) Hard reset\r\n"
-            "  F) Factory reset (wipe /flash + reboot)\r\n"
+            "  F) Factory defaults (wipe /flash + reboot)\r\n"
             "  D) Enter DFU (firmware update)\r\n"
             "  0) Exit console\r\n"
             "feeder> "
@@ -193,9 +194,9 @@ class SerialConsole:
                 elif choice == '4':
                     self._show_dmesg()
                 elif choice == '5':
-                    await self._run_clicky()
-                elif choice == '6':
                     self._show_status()
+                elif choice == 'p':
+                    await self._program_floor()
                 elif choice == 'r':
                     self._write("Enabling USB mass storage for filesystem access...\r\n")
                     try:
@@ -228,7 +229,13 @@ class SerialConsole:
                 else:
                     self._write("Unknown option.\r\n")
         except Exception as e:
-            self._write(f"\r\nConsole error: {e}\r\n")
+            # str(e) is empty for some built-ins (e.g. MemoryError), which used to render
+            # as a blank "Console error: " with no clue what happened. Print the full
+            # traceback (class name + line) so the real cause is always visible.
+            self._write(f"\r\nConsole error: {type(e).__name__}\r\n")
+            sys.print_exception(e)
+            if self.dmesg:
+                self.dmesg.log(f"CONSOLE: error {type(e).__name__}: {e}")
             return 'resume'
         finally:
             micropython.kbd_intr(self._resting_kbd)
@@ -257,17 +264,6 @@ class SerialConsole:
         finally:
             micropython.kbd_intr(-1)
 
-    async def _run_clicky(self):
-        self._write("\r\n--- Button test (Ctrl+C to exit) ---\r\n")
-        micropython.kbd_intr(3)
-        try:
-            from util.clicky import run_test
-            await run_test(self.app)
-        except (Exception, KeyboardInterrupt) as e:
-            self._write(f"\r\nButton test ended: {e}\r\n")
-        finally:
-            micropython.kbd_intr(-1)
-
     def _show_status(self):
         from util.misc import mem_usage
         # Wrap-safe uptime from dmesg (raw ticks_ms() wraps every ~12 days).
@@ -290,6 +286,85 @@ class SerialConsole:
                             f"last={servo.result_name} profile={servo.active_profile}\r\n")
             except Exception as e:
                 self._write(f"Servo status error: {e}\r\n")
+
+    async def _program_floor(self):
+        """Console equivalent of Photon's PROGRAM_FEEDER_FLOOR command (photon.py's
+        _set_address) - lets an operator (re)assign this feeder's Slot ID by hand,
+        e.g. for boards without RS485 host access yet, or SLOT_OVERRIDE boards with
+        no EEPROM populated at all."""
+        self._write("\r\n--- Program Feeder Floor ---\r\n")
+        eeprom = self.app.get('EEPROM')
+        current = None
+        if eeprom:
+            try:
+                data = eeprom.read_memory(0, 1)
+                if data and len(data) == 1:
+                    value = int(data[0])
+                    if 1 <= value <= 254:
+                        current = value
+            except Exception as e:
+                self._write(f"EEPROM read failed: {e}\r\n")
+
+        if current is not None:
+            self._write(f"Current Slot ID (from EEPROM): {current}\r\n")
+        else:
+            cached = self.sysconfig.get('SYSTEM.SLOT_ID', 255) if self.sysconfig else '?'
+            self._write(f"Could not read a valid Slot ID from EEPROM - last known (sysconfig): {cached}\r\n")
+
+        self._write("Program a new Slot ID? (y/N): ")
+        line = await self._read_line(_INACTIVITY_MS)
+        if line is None:
+            self._write("\r\n*** Idle timeout ***\r\n")
+            return
+        if line.strip().lower() not in ('y', 'yes'):
+            self._write("Cancelled.\r\n")
+            return
+
+        self._write("New Slot ID (1-254): ")
+        line = await self._read_line(_INACTIVITY_MS)
+        if line is None:
+            self._write("\r\n*** Idle timeout ***\r\n")
+            return
+        try:
+            new_slot = int(line.strip())
+        except ValueError:
+            self._write("Invalid Slot ID - must be a number.\r\n")
+            return
+        if not (1 <= new_slot <= 254):
+            self._write("Invalid Slot ID - must be 1-254 (0 is the host, 255 is broadcast).\r\n")
+            return
+
+        self._write(f"Write Slot ID {new_slot} to EEPROM and sysconfig? (y/N): ")
+        line = await self._read_line(_INACTIVITY_MS)
+        if line is None:
+            self._write("\r\n*** Idle timeout ***\r\n")
+            return
+        if line.strip().lower() not in ('y', 'yes'):
+            self._write("Cancelled.\r\n")
+            return
+
+        wrote_eeprom = False
+        if eeprom:
+            # write_memory is verified (read-back compare); a failed persist must
+            # not be reported as success - the address would evaporate on reboot.
+            if not eeprom.write_memory(0, bytes([new_slot])):
+                self._write("EEPROM write failed to verify - Slot ID NOT changed.\r\n")
+                if self.dmesg:
+                    self.dmesg.log(f"CONSOLE: Program floor - EEPROM write for slot {new_slot} did not verify.")
+                return
+            wrote_eeprom = True
+
+        if self.sysconfig:
+            self.sysconfig.set('SYSTEM.SLOT_ID', new_slot)
+            self.sysconfig.save()
+
+        if wrote_eeprom:
+            self._write(f"Slot ID {new_slot} written to EEPROM and sysconfig.\r\n")
+        else:
+            self._write(f"No EEPROM present - Slot ID {new_slot} saved to sysconfig only.\r\n")
+        self._write("Reboot for it to take effect on the RS485 bus.\r\n")
+        if self.dmesg:
+            self.dmesg.log(f"CONSOLE: Slot ID programmed to {new_slot} (EEPROM={'yes' if wrote_eeprom else 'no'}).")
 
     async def _sysconfig_menu(self):
         """Simple registry-editor submenu: view / edit / save."""
@@ -413,7 +488,7 @@ class SerialConsole:
     async def _factory_reset(self, root='/flash'):
         """Wipe everything on the filesystem (config, logs, overrides) and reset so the
         device boots from frozen defaults. The EEPROM-stored slot address is untouched."""
-        self._write("\r\n*** FACTORY RESET ***\r\n")
+        self._write("\r\n*** FACTORY DEFAULTS ***\r\n")
         self._write(f"This erases ALL files on {root} (config, logs, dev overrides) and reboots\r\n" +
                     "to firmware defaults. The programmed slot address (EEPROM) is kept.\r\n")
         self._write("Type RESET to confirm (anything else cancels)\r\nconfirm> ")

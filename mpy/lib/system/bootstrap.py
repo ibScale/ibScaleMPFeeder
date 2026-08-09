@@ -4,8 +4,9 @@
 
 # bootstrap.py - Initializes the hardware and environment so the application doesn't have to
 
-import os, gc
+import os
 from util.misc import vfs_info, get_uuid
+from system.gcutil import collect as gc_collect
 
 def _log(DMESG, msg, force=False, debug_mode=False):
     """Bootstrap logging function."""
@@ -34,9 +35,9 @@ def _log_system_info(DMESG):
         _log(DMESG, f"ERROR reading VFS info: {e}", force=True)
 
 def _setup_identity(DMESG, SYSCONFIG, app_passthrough):
-    """Sets UUID and reads Slot ID from EEPROM."""
+    """Sets UUID and reads Slot ID from EEPROM (unless SYSTEM.SLOT_OVERRIDE)."""
     debug_mode = SYSCONFIG.get('SYSTEM.DEBUG', False)
-    
+
     # Set UUID
     try:
         uuid_str = get_uuid()
@@ -44,6 +45,14 @@ def _setup_identity(DMESG, SYSCONFIG, app_passthrough):
         SYSCONFIG.set('SYSTEM.UUID', uuid_str)
     except Exception as e:
         _log(DMESG, f"ERROR setting UUID: {e}", force=True)
+
+    # SLOT_OVERRIDE: skip the EEPROM entirely and advertise whatever SYSTEM.SLOT_ID
+    # already holds in sysconfig - for boards with no EEPROM wired/populated, or
+    # when a fixed slot is wanted regardless of what's programmed onto the chip.
+    if SYSCONFIG.get('SYSTEM.SLOT_OVERRIDE', False):
+        slot_id = SYSCONFIG.get('SYSTEM.SLOT_ID', 255)
+        _log(DMESG, f"SLOT_OVERRIDE active - using SYSTEM.SLOT_ID {slot_id}, EEPROM not read.", force=True)
+        return
 
     # Initialize EEPROM if configured and read Slot ID. Fallback when the chip can't
     # be read is 255 = unaddressed, matching the reference Photon firmware's blank
@@ -54,7 +63,7 @@ def _setup_identity(DMESG, SYSCONFIG, app_passthrough):
     eeprom_pin = SYSCONFIG.get('SYSTEM.EEPROM_PIN')
     if not eeprom_pin:
         _log(DMESG, f"EEPROM: No pin configured - Using Slot ID {slot_id}", force=True)
-        SYSCONFIG.set('SYSTEM.SLOTID', slot_id)
+        SYSCONFIG.set('SYSTEM.SLOT_ID', slot_id)
         return
 
     try:
@@ -80,7 +89,7 @@ def _setup_identity(DMESG, SYSCONFIG, app_passthrough):
     except Exception as e:
         _log(DMESG, f"EEPROM: Error accessing device ({e}) - Using default Slot ID {slot_id}", force=True)
 
-    SYSCONFIG.set('SYSTEM.SLOTID', slot_id)
+    SYSCONFIG.set('SYSTEM.SLOT_ID', slot_id)
     _log(DMESG, f"Using Slot ID: {slot_id}")
 
 def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough):
@@ -92,9 +101,9 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough):
         _log(DMESG, "Initializing buttons...", debug_mode=debug_mode)
         from hardware.buttons import Button
         btn_cfg = SYSCONFIG.get('BUTTONS')
-        for btn_name, pin_key, high_key in [('BTNUP', 'UP', 'UP_HIGH'), ('BTNDOWN', 'DOWN', 'DOWN_HIGH')]:
+        for btn_name, pin_key, invert_key in [('BTNUP', 'UP', 'UP_INVERT'), ('BTNDOWN', 'DOWN', 'DOWN_INVERT')]:
             app_passthrough[btn_name] = Button(
-                pin_name=btn_cfg[pin_key], active_high=btn_cfg[high_key],
+                pin_name=btn_cfg[pin_key], active_high=not btn_cfg[invert_key],
                 debounce_ms=btn_cfg['DEBOUNCE_MS'], double_click_ms=btn_cfg['DOUBLE_CLICK_MS'],
                 long_press_ms=btn_cfg['LONG_PRESS_MS'],
                 SYSCONFIG=SYSCONFIG, DMESG=DMESG
@@ -126,7 +135,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough):
             DMESG=DMESG, REDPIN=led_cfg['REDPIN'], GREENPIN=led_cfg['GREENPIN'], BLUEPIN=led_cfg['BLUEPIN'],
             TIMER_ID=led_cfg['TIMER_ID'], PWM_FREQUENCY=led_cfg['PWM_FREQUENCY'],
             RED_CH=led_cfg['RED_CH'], GREEN_CH=led_cfg['GREEN_CH'], BLUE_CH=led_cfg['BLUE_CH'],
-            INVERT=led_cfg['INVERT'], STATES=led_cfg.get('STATES')
+            INVERT=led_cfg['INVERT'], CHANNEL_COLORS=led_cfg.get('CHANNEL_COLORS'), STATES=led_cfg.get('STATES')
         )
         app_passthrough['LED'] = LED
     except Exception as e:
@@ -196,7 +205,7 @@ def _initialize_hardware(DMESG, SYSCONFIG, app_passthrough):
             brake=servo_cfg.get('BRAKE', True),
             stall_ms=servo_cfg.get('STALL_MS', 300), stall_eps=servo_cfg.get('STALL_EPS', 3),
             move_timeout_ms=servo_cfg.get('MOVE_TIMEOUT_MS', 10000),
-            profiles=profiles, default_profile=SYSCONFIG.get('SYSTEM.SLOT_PROFILE', 'normal'),
+            profiles=profiles, default_profile=SYSCONFIG.get('APP.SLOT_PROFILE', 'normal'),
             peel=PEEL, peel_enable=servo_cfg.get('PEEL_ENABLE', True),
             post_peel_ms=servo_cfg.get('POST_PEEL_MS', 200),
             debug_enabled=servo_cfg.get('DEBUG', debug_mode)
@@ -244,5 +253,5 @@ def run_bootstrap(app_passthrough: dict):
     _setup_identity(DMESG, SYSCONFIG, app_passthrough)
     _initialize_hardware(DMESG, SYSCONFIG, app_passthrough)
 
-    gc.collect()
+    gc_collect()
     _log(DMESG, "BOOTSTRAP: Initialization Complete.", force=True)

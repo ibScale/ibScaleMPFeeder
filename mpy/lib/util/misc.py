@@ -51,47 +51,6 @@ def profiler_test(app_passthrough):
     except Exception as e:
         dmesg.log(f"REPL: Error during profiler_test(): {e}")
 
-def clicky_test(app_passthrough):
-    """Runs the Clicky button test via util.clicky.run_test"""
-    if not isinstance(app_passthrough, dict):
-        print("REPL Error: Invalid app_passthrough provided.")
-        return
-
-    dmesg = app_passthrough.get('DMESG')
-
-    try:
-        from util.clicky import run_test
-        if dmesg: 
-            dmesg.log("REPL: Starting clicky button test...")
-        print("Starting clicky button test...")
-
-        asyncio.run(run_test(app_passthrough))
-
-        if dmesg: 
-            dmesg.log("REPL: Clicky button test finished or interrupted.")
-        print("Clicky button test finished or interrupted.")
-
-    except ImportError:
-        err_msg = "REPL: Error - Could not import run_test from util.clicky."
-        print(err_msg)
-        if dmesg: 
-            dmesg.log(err_msg)
-    except KeyError as e:
-        err_msg = f"REPL: Error - Missing key '{e}' in app_passthrough for clicky test."
-        print(err_msg)
-        if dmesg: 
-            dmesg.log(err_msg)
-    except KeyboardInterrupt:
-        err_msg = "REPL: Clicky test interrupted by user at misc level."
-        print(err_msg)
-        if dmesg: 
-            dmesg.log(err_msg)
-    except Exception as e:
-        err_msg = f"REPL: Error during clicky_test(): {e}"
-        print(err_msg)
-        if dmesg: 
-            dmesg.log(err_msg)
-
 def vfs_info(mount='/flash'):
     """Get filesystem info."""
     try:
@@ -113,7 +72,8 @@ def mem_usage():
     """Returns MCU total RAM, available RAM, used RAM, and free RAM."""
     try:
         import gc
-        gc.collect()  # Force garbage collection for accurate reading
+        from system.gcutil import collect as gc_collect
+        gc_collect()  # Force garbage collection for accurate reading
 
         # Get heap memory info
         heap_used = gc.mem_alloc()

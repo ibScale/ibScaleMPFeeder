@@ -7,10 +7,10 @@
 
 import asyncio
 import time
-import gc
 import micropython
 from util.misc import mem_usage, vfs_info
 from system.watchdog import start as wdt_start, feed as wdt_feed
+from system.gcutil import collect as gc_collect, ran_recently as gc_ran_recently
 from system.servo import RESULT_STALLED, RESULT_TIMEOUT
 
 def log_interval(vdc, vsys, temp):
@@ -141,9 +141,10 @@ def run_app(app_globals):
 
     # Manual jog distances derived from encoder scaling (TICKS_010MM = ticks per 0.1mm)
     ticks_per_mm = SYSCONFIG.get('SYSTEM.TICKS_010MM', 22.546) * 10
-    jog_click_ticks = max(1, int(ticks_per_mm))         # ~1mm per short click
+    jog_mm = SYSCONFIG.get('APP.JOG_MM', 2)
+    jog_click_ticks = max(1, int(ticks_per_mm * jog_mm))  # JOG_MM mm per short click
     jog_hold_ticks = max(1, int(ticks_per_mm * 200))    # far target; a held button feeds until released
-    slot_profile = SYSCONFIG.get('SYSTEM.SLOT_PROFILE', 'normal')
+    slot_profile = SYSCONFIG.get('APP.SLOT_PROFILE', 'normal')
 
     # Main loop settings
     loop_time_ms = SYSCONFIG.get('APP.LOOP_INTERVAL_MS', 20) # Main control loop (20ms)
@@ -164,7 +165,7 @@ def run_app(app_globals):
     PHOTON = None
     try:
         from application.photon import Photon
-        node_address = SYSCONFIG.get('SYSTEM.SLOTID', 255)
+        node_address = SYSCONFIG.get('SYSTEM.SLOT_ID', 255)
         uuid = SYSCONFIG.get('SYSTEM.UUID', 0)
         PHOTON = Photon(NETWORK, DMESG, SERVO, LED, SYSCONFIG,
                         eeprom=app_globals.get('EEPROM'), node_address=node_address, uuid=uuid)
@@ -279,15 +280,13 @@ def run_app(app_globals):
                 photon_stop = time.ticks_ms()
                 
                 # Provide heartbeat and maintenance
-                ran_gc = False
                 loop_count += 1
                 if loop_count >= log_time_count:
                     loop_count = 0
                     gc_count += 1
                     if gc_count >= gc_time_count:
                         gc_count = 0
-                        gc.collect()
-                        ran_gc = True
+                        gc_collect()
 
                     # Read the ADC once per tick; the heartbeat message and the
                     # fault checks below share these values.
@@ -380,7 +379,13 @@ def run_app(app_globals):
                     await asyncio.sleep_ms(sleep_time)
                     continue
 
-                if not ran_gc:
+                # A GC pass alone can take longer than the loop budget - that's a known,
+                # already-accounted-for cost (APP.GC_INTERVAL_MS), not a real scheduling
+                # problem, so don't log it as an overrun. gc_ran_recently() catches this
+                # loop's own gc_collect() above AND any collect() triggered elsewhere
+                # during this same iteration (e.g. sysconfig.save() from a Photon
+                # PROGRAM_FEEDER_FLOOR command) that this loop has no other way to see.
+                if not gc_ran_recently(loop_time_ms):
                     log_msg(f"Loop overrun: {loop_elapsed}ms (target: {loop_time_ms}ms)")
 
                 # Overrun path: still yield once so queued tasks (the stats

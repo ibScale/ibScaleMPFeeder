@@ -15,8 +15,12 @@
 # what a Photon MOVE_FEED or button jog does - at the loaded tape's pitch, with the
 # peel motor running as it would in production. Sweep CREEP from fast to slow, score
 # each batch by repeatability (std), bias (|mean|), overshoot and faults, then pick
-# the slowest reliable value with no overshoot. If overshoot persists, lengthen
-# CREEP_TICKS. Apply to the live servo and optionally persist to sysconfig.
+# the slowest reliable value with no overshoot. A stall at any CREEP disqualifies that
+# speed AND every slower one tested afterward, even if a later batch looks clean - a
+# slower creep only has less momentum to work with, so it's assumed at least as
+# stall-prone rather than trusting a small sample that got lucky. If overshoot
+# persists, lengthen CREEP_TICKS. Apply to the live servo and optionally persist to
+# sysconfig.
 #
 # Moves are strictly FORWARD - tape can't be rewound through the mechanism. feed()
 # would only ever plan a reverse if a previous overshoot pushed the actual position
@@ -146,8 +150,11 @@ def _summarize(samples):
 
 
 def _score(m):
-    """Lower is better. None if the batch had a fault (unusable)."""
-    if m['fault'] > 0:
+    """Lower is better. None if the batch had a fault, or a faster CREEP in the same
+    sweep already faulted - stalling isn't a fluke of that one speed, and slower CREEP
+    only has less momentum to work with, so it's assumed at least as stall-prone and
+    disqualified along with it rather than risking picking it off a lucky small sample."""
+    if m['fault'] > 0 or m.get('disqualified'):
         return None
     overshoot_rate = m['overshoot'] / m['n']
     # Overshoot dominates (we can't reverse to fix it); then repeatability, then bias.
@@ -261,7 +268,7 @@ async def run_performance_profiler(app_passthrough):
         _log(dmesg, "SERVO/SYSCONFIG missing - cannot run.")
         return
 
-    slot_profile = sysconfig.get('SYSTEM.SLOT_PROFILE', 'normal')
+    slot_profile = sysconfig.get('APP.SLOT_PROFILE', 'normal')
     ticks_per_mm = sysconfig.get('SYSTEM.TICKS_010MM', 22.546) * 10
     samples = 6
 
@@ -273,8 +280,22 @@ async def run_performance_profiler(app_passthrough):
     except Exception:
         pitch_mm = _DEFAULT_PITCH_MM  # headless / no stdin
     distance = int(pitch_mm * ticks_per_mm)
+
+    # Stop-confirmation window in ticks - how close counts as "reached" (a landing
+    # farther out than this scores as overshoot). Defaults to the live SERVO.TOLERANCE
+    # from sysconfig; let the operator try a tighter/looser window for this run
+    # without hand-editing sysconfig first.
+    orig_tolerance = servo.tolerance
+    try:
+        raw = _input(f"Servo tolerance in ticks [{servo.tolerance}]: ")
+        if raw:
+            servo.tolerance = abs(int(raw))
+    except Exception:
+        pass  # headless / no stdin / bad input: keep the sysconfig default
+
     if distance <= servo.tolerance:
-        _log(dmesg, f"Pitch {pitch_mm}mm ({distance}t) is within TOLERANCE - nothing to tune.")
+        _log(dmesg, f"Pitch {pitch_mm}mm ({distance}t) is within TOLERANCE ({servo.tolerance}t) - nothing to tune.")
+        servo.tolerance = orig_tolerance
         return
 
     # Peel motor: default to production behavior, but let the operator turn it off
@@ -287,7 +308,7 @@ async def run_performance_profiler(app_passthrough):
 
     # Preserve originals so we can restore on decline/abort.
     orig = {'creep': servo.creep_output, 'creep_ticks': servo.creep_ticks,
-            'peel': servo.peel_motor_enabled_by_servo}
+            'peel': servo.peel_motor_enabled_by_servo, 'tolerance': orig_tolerance}
     servo.peel_enable(peel_on)
 
     # Worst-case forward travel estimate (probe + CREEP sweep + CREEP_TICKS refine)
@@ -299,7 +320,8 @@ async def run_performance_profiler(app_passthrough):
     _log(dmesg, "=== Servo auto-tune ===")
     peel_desc = 'ON' if peel_on else 'OFF'
     _log(dmesg, f"Production-path feeds: {pitch_mm}mm ({distance}t) each, profile '{slot_profile}', " +
-                f"{samples} samples/step, {_DWELL_MS}ms dwell between feeds, peel {peel_desc}.")
+                f"{samples} samples/step, {_DWELL_MS}ms dwell between feeds, peel {peel_desc}, " +
+                f"tolerance {servo.tolerance}t.")
     _log(dmesg, f"Forward-only - tape will advance up to ~{worst_ticks} ticks (~{worst_mm:.0f}mm). " +
                 "Ensure enough tape is loaded.")
 
@@ -318,11 +340,19 @@ async def run_performance_profiler(app_passthrough):
         # --- Sweep CREEP -------------------------------------------------
         _log(dmesg, "Sweeping CREEP (fast -> slow):")
         results = []  # (creep, metrics)
+        fault_floor_hit = False
         for creep in _creep_candidates(servo):
             servo.creep_output = creep  # set_target() re-derives its ramp from this every move
             m = _measure(servo, dmesg, distance, samples, slot_profile)
+            if fault_floor_hit:
+                # A faster CREEP already stalled this sweep - every slower one is
+                # disqualified too, even if this particular batch came back clean.
+                m['disqualified'] = True
             results.append((creep, m))
             _report_row(dmesg, f"CREEP={creep}", m)
+            if m['fault'] > 0 and not fault_floor_hit:
+                fault_floor_hit = True
+                _log(dmesg, f"CREEP={creep} stalled - disqualifying it and every slower CREEP tested from here.")
             if m['aborted'] or m['fault'] == m['n']:
                 # The sweep runs fast -> slow, so once a candidate stalls repeatedly
                 # every slower one will only fault harder - stop wasting tape.
@@ -395,12 +425,14 @@ async def run_performance_profiler(app_passthrough):
         if ans in ('', 'y', 'yes'):
             sysconfig.set('SERVO.CREEP', best_creep)
             sysconfig.set('SERVO.CREEP_TICKS', best_creep_ticks)
+            sysconfig.set('SERVO.TOLERANCE', servo.tolerance)
             sysconfig.save()
-            # Live servo already holds best_creep / best_creep_ticks.
+            # Live servo already holds best_creep / best_creep_ticks / tolerance.
             _log(dmesg, "Saved and applied.")
         else:
             servo.creep_output = orig['creep']
             servo.set_creep_ticks(orig['creep_ticks'])
+            servo.tolerance = orig['tolerance']
             _log(dmesg, "Discarded; servo restored to previous values.")
 
         # --- Unloading aid ------------------------------------------------
@@ -410,6 +442,7 @@ async def run_performance_profiler(app_passthrough):
         _log(dmesg, f"ERROR during tuning: {e}")
         servo.creep_output = orig['creep']
         servo.set_creep_ticks(orig['creep_ticks'])
+        servo.tolerance = orig['tolerance']
     finally:
         servo.peel_enable(orig['peel'])
         servo.disable()

@@ -5,8 +5,8 @@
 # sysconfig.py - Provide a system configuration database based on JSON
 
 import json
-import gc
 import os
+from system.gcutil import collect as gc_collect
 
 class SysConfig:
     """Handles loading, accessing, modifying, and saving system configuration."""
@@ -85,7 +85,7 @@ class SysConfig:
                 pass
             os.rename(tmp, self.filename)
             self._log(f"Configuration saved to '{self.filename}'")
-            gc.collect()
+            gc_collect()
         except OSError as e:
             self._log(f"Error saving to '{self.filename}': {e}")
             try:

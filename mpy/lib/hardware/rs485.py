@@ -14,7 +14,7 @@
 
 import machine, time
 
-DE_PIN_DRIVE, DE_PIN_RECEIVE = 1, 0
+RS485_DRIVE, RS485_RECEIVE = 1, 0
 
 
 class RS485:
@@ -42,7 +42,7 @@ class RS485:
 
         try:
             self._de_pin = machine.Pin(de_pin_name, machine.Pin.OUT)
-            self._de_pin.value(DE_PIN_RECEIVE)
+            self._de_pin.value(RS485_RECEIVE)
             self._uart = machine.UART(uart_id, baudrate=baudrate, bits=data_bits,
                                       parity=parity, stop=stop_bits, timeout=10, timeout_char=5)
             self._uart.irq(trigger=machine.UART.IRQ_RXIDLE, handler=self._uart_irq_handler)
@@ -106,7 +106,7 @@ class RS485:
             self._log(f"Sending {len(data)} bytes", debug=True)
 
         self._uart.irq(None)
-        self._de_pin.value(DE_PIN_DRIVE)
+        self._de_pin.value(RS485_DRIVE)
         time.sleep_us(20)
 
         try:
@@ -125,7 +125,7 @@ class RS485:
             time.sleep_us(20)
             # Guard against a concurrent deinit() having torn down the hardware.
             if self._de_pin:
-                self._de_pin.value(DE_PIN_RECEIVE)
+                self._de_pin.value(RS485_RECEIVE)
             if self._uart:
                 self._uart.irq(trigger=machine.UART.IRQ_RXIDLE, handler=self._uart_irq_handler)
 

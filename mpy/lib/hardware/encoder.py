@@ -24,7 +24,8 @@ class Encoder:
         self._count = self._absolute_count = self._last_count = 0
         self._direction = 0
 
-        self._log(f"Init - Timer: {timer_num}, PinA:'{pin_a_name}', PinB:'{pin_b_name}', AF:{pin_af}, Inv:{invert}", force=True)
+        self._log(f"Init - Timer: {timer_num}, PinA:'{pin_a_name}', PinB:'{pin_b_name}', AF:{pin_af}, " +
+                  f"Inv:{invert}, MaxCount:{self.max_count}", force=True)
 
         try:
             # Setup pins
@@ -32,7 +33,7 @@ class Encoder:
             machine.Pin(pin_b_name, machine.Pin.AF_PP, af=pin_af)
 
             # Setup timer
-            self.encoder_timer = pyb.Timer(timer_num, prescaler=0, period=max_count)
+            self.encoder_timer = pyb.Timer(timer_num, prescaler=0, period=self.max_count)
             self.encoder_timer.channel(1, pyb.Timer.ENC_AB)
 
             # Initialize state

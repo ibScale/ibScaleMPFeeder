@@ -4,7 +4,7 @@
 
 # eeprom_at21cs01.py - Microchip AT21CS01 single-wire EEPROM driver (128 bytes).
 #
-# Implemented from the real datasheet (Microchip DS20005857) - the AT21CS01 is NOT
+# Implemented from the Microchip datasheet DS20005857 - the AT21CS01 is NOT
 # a Dallas 1-Wire device. It emulates the I2C protocol over one open-drain wire:
 # every transaction is a Start (line idle high >= tHTSS), then bytes MSB-first,
 # each followed by an ACK(0)/NACK(1) bit from the receiver. The device address

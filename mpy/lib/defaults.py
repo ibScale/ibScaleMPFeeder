@@ -7,17 +7,19 @@
 DEFAULT_SYSCONFIG = {
     "SYSTEM": {
         "UUID": None,
-        "SLOTID": 255,  # 255 = Unprogrammed (answers broadcast only, like the reference firmware; 0 is the host)
+        "SLOT_ID": 255,  # 255 = Unprogrammed (answers broadcast only, like the reference firmware; 0 is the LumenPNP host, 1-254 are valid slot IDs)
+        "SLOT_OVERRIDE": False, # Ignore EEPROM and advertise as SLOT_ID
         "EEPROM_PIN": "ONEWIRE",
         "EEPROM_DRIVER": "DS28E07",  # LumenPNP uses a Maxim DS28E07 by default
-        "TICKS_010MM": 22.546,  # How many ticks per 0.10mm
-        "SLOT_PROFILE": "normal",  # Speed profile for this slot's parts (gentle/normal/fast)
+        "TICKS_010MM": 22.546,  # How many encoder ticks per 0.10mm linear movement
         "APP": "app.py",  # What to launch after we're done here
-        "WATCHDOG_S": 0,  # Hardware watchdog timeout in seconds; 0 = off. Once on it runs until reset (~32s max)
+        "WATCHDOG_S": 0,  # Hardware watchdog timeout in seconds; 0 = off, once activated it must be fed every `WATCHDOG_S` seconds or it will reset.
         "DEBUG": False,  # Debug levels of logging. !!! LOTS OF NOISE !!!
         "TEMP_MAX_C": 70,  # LED turns solid red + FAULT logged if MCU temp reaches/exceeds this
     },
     "APP": {
+        "SLOT_PROFILE": "normal",  # Speed profile for this slot's parts (gentle/normal/fast)
+        "JOG_MM": 2,   # Default jog size in mm for button click; 2mm in Photon
         "LOOP_INTERVAL_MS": 20,  # Main app control loop time
         "TICK_INTERVAL_MS": 5000,  # How often for application tick aka heartbeat
         "GC_INTERVAL_MS": 60000,  # How often to run garbage collection, this is blocking and typically takes 20-25ms, so run sparingly, like 1+ min intervals
@@ -44,6 +46,11 @@ DEFAULT_SYSCONFIG = {
         "GREEN_CH": 2,
         "BLUE_CH": 3,
         "INVERT": True,  # Common Cathode
+        # Which physical channel (0=RED_CH/REDPIN, 1=GREEN_CH/GREENPIN, 2=BLUE_CH/BLUEPIN)
+        # actually lights which color, as an 'R'/'G'/'B' per position. Some boards have
+        # the die color order swapped vs. the pin names; run the console's calibration
+        # (option 1 -> LED wiring calibration) to determine this rather than guessing.
+        "CHANNEL_COLORS": ["R", "G", "B"],
         # Status -> color policy (names from led.py COLORS or '#RRGGBB' hex). All
         # code sets LED state by name (LED.state('fault')); re-theme it here.
         "STATES": {
@@ -78,9 +85,9 @@ DEFAULT_SYSCONFIG = {
     "ENCODER": {
         "PINA": "DRIVEENCA",  # Pins are the same
         "PINB": "DRIVEENCB",
-        "TIMER": 3,  # Hardware timer
-        "TIMER_AF": 2,  # And encoder alternate function
-        "MAX": 65535,  # 16-bit timer is universal
+        "TIMER": 3,  # 16-bit Hardware timer
+        "TIMER_AF": 2,  # Hardware encoder alternate function
+        "MAX": 65535,  # 16-bit timer, must match hardware timer used
         "INVERT": False,  # Invert direction
     },
     "RS485": {
@@ -123,9 +130,9 @@ DEFAULT_SYSCONFIG = {
     },
     "BUTTONS": {
         "UP": "BTNUP",  # Pin name for UP button
-        "UP_HIGH": False,  # Up button is active low
+        "UP_INVERT": True,  # Set if the button is active low (pressed = pin reads low)
         "DOWN": "BTNDOWN",  # Pin name for DOWN button
-        "DOWN_HIGH": False,  # Down button is active low
+        "DOWN_INVERT": True,  # Ditto, but for DOWN button
         "DEBOUNCE_MS": 50,  # Debounce time in milliseconds
         "DOUBLE_CLICK_MS": 300,  # Max time in ms between clicks for a double click
         "LONG_PRESS_MS": 750,  # Time in ms to hold for a long press
