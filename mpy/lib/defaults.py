@@ -20,6 +20,7 @@ DEFAULT_SYSCONFIG = {
     "APP": {
         "SLOT_PROFILE": "normal",  # Speed profile for this slot's parts (gentle/normal/fast)
         "JOG_MM": 2,   # Default jog size in mm for button click; 2mm in Photon
+        "PART_ID": 'None',  # Part ID for external part identification I.E. R0802-10K or whatever nomenclature does it for you
         "LOOP_INTERVAL_MS": 20,  # Main app control loop time
         "TICK_INTERVAL_MS": 5000,  # How often for application tick aka heartbeat
         "GC_INTERVAL_MS": 60000,  # How often to run garbage collection, this is blocking and typically takes 20-25ms, so run sparingly, like 1+ min intervals
