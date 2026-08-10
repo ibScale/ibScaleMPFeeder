@@ -4990,7 +4990,7 @@
 		(descr "Capacitor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal with elongated pad for handsoldering. (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
 		(tags "capacitor handsolder")
 		(property "Reference" "C23"
-			(at 0 -1.35 90)
+			(at -0.4 -1.4 90)
 			(layer "F.SilkS")
 			(uuid "6e4f5481-27a6-4e5a-bc01-7466c98e24f5")
 			(effects
@@ -5596,7 +5596,7 @@
 		(descr "ST  UQFN, 6 Pin (https://www.st.com/resource/en/datasheet/ecmf02-2amx6.pdf), generated with kicad-footprint-generator ipc_noLead_generator.py")
 		(tags "ST UQFN NoLead")
 		(property "Reference" "U6"
-			(at -1.702072 1.77043 90)
+			(at -1.802072 -2.22957 90)
 			(layer "F.SilkS")
 			(uuid "cb8982fa-2ce0-406e-b160-10bac26d97a0")
 			(effects
@@ -6913,7 +6913,7 @@
 		(uuid "3bc71bcd-be0a-4598-9121-ba7f77de44a5")
 		(at 126 111.2 180)
 		(property "Reference" "D7"
-			(at 3.1 -0.7 0)
+			(at 3.05 -0.5 0)
 			(layer "F.SilkS")
 			(uuid "e5c8e360-45a5-43a0-a668-7fe2dd5ec5c1")
 			(effects
@@ -11003,7 +11003,7 @@
 		(descr "Resistor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal with elongated pad for handsoldering. (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
 		(tags "resistor handsolder")
 		(property "Reference" "R26"
-			(at 0 1.45 90)
+			(at -3.15 0 90)
 			(layer "F.SilkS")
 			(uuid "fa8fee76-6d27-4676-a5c1-ddbe201fb1dc")
 			(effects
@@ -16349,7 +16349,7 @@
 		(descr "module CMS SOT223 4 pins")
 		(tags "CMS SOT")
 		(property "Reference" "U9"
-			(at -1.408266 -4.282372 90)
+			(at 3.041734 -3.132372 180)
 			(layer "F.SilkS")
 			(uuid "a097f15e-f8e2-4222-bb0a-8c72a47bd0c0")
 			(effects
@@ -20847,7 +20847,7 @@
 		(descr "Capacitor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal with elongated pad for handsoldering. (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor handsolder")
 		(property "Reference" "C32"
-			(at 3.35 0 90)
+			(at 3 -0.05 90)
 			(layer "F.SilkS")
 			(uuid "4b83cec7-b4f7-48ae-ba1b-b49d756cd8f3")
 			(effects
@@ -29976,7 +29976,7 @@
 		(descr "Inductor,TDK, VLS-6045, 6x6x4.5mm, https://product.tdk.com/system/files/dam/doc/product/inductor/inductor/smd/catalog/inductor_commercial_power_vls6045ex_en.pdf")
 		(tags "inductor TDK VLS SMD VLS6045EF VLS6045AF")
 		(property "Reference" "L1"
-			(at -4.279234 0.017423 0)
+			(at -4.05 0.017423 0)
 			(unlocked yes)
 			(layer "F.SilkS")
 			(uuid "e43a0aa2-7b6f-4a87-b412-403e743cc033")
@@ -37140,14 +37140,6 @@
 		(layer "F.Cu")
 		(net "GND")
 		(uuid "13ca219a-a465-4958-85fd-aed24c83fbe2")
-	)
-	(segment
-		(start 126.306575 36.30625)
-		(end 125.90875 36.30625)
-		(width 0.3)
-		(layer "F.Cu")
-		(net "GND")
-		(uuid "1c03272c-c870-44f9-94d3-29d8db21f953")
 	)
 	(segment
 		(start 112.94 39.05)
