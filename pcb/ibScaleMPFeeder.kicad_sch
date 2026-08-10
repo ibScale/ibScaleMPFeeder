@@ -10538,6 +10538,12 @@
 		(uuid "403f948b-7e9e-4ee1-9e07-75e07ed33351")
 	)
 	(junction
+		(at 101.6 38.1)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "41e93d6d-aed8-48db-aeec-4f8a6555e2bc")
+	)
+	(junction
 		(at 55.88 158.75)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -10656,12 +10662,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "8200a363-0ecf-4ba1-a577-84539f53ac71")
-	)
-	(junction
-		(at 91.44 35.56)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "89f1d6cc-b4f9-4869-8db7-25cbcf0cb5aa")
 	)
 	(junction
 		(at 124.46 111.76)
@@ -11173,16 +11173,6 @@
 	)
 	(wire
 		(pts
-			(xy 91.44 35.56) (xy 101.6 35.56)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "2c28a3d7-941f-46d8-84a7-425bee56da36")
-	)
-	(wire
-		(pts
 			(xy 152.4 233.68) (xy 152.4 236.22)
 		)
 		(stroke
@@ -11433,7 +11423,7 @@
 	)
 	(wire
 		(pts
-			(xy 86.36 35.56) (xy 91.44 35.56)
+			(xy 86.36 35.56) (xy 101.6 35.56)
 		)
 		(stroke
 			(width 0)
@@ -11510,6 +11500,26 @@
 			(type default)
 		)
 		(uuid "51909b0a-61aa-4671-accb-461deb7f44a0")
+	)
+	(wire
+		(pts
+			(xy 101.6 38.1) (xy 101.6 43.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "52a6aaec-4833-47ac-8594-a201e1adb32c")
+	)
+	(wire
+		(pts
+			(xy 101.6 38.1) (xy 91.44 38.1)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "57072fc2-22e3-4209-92dc-6d6c5ce2e517")
 	)
 	(wire
 		(pts
@@ -12163,23 +12173,13 @@
 	)
 	(wire
 		(pts
-			(xy 101.6 35.56) (xy 101.6 43.18)
+			(xy 101.6 35.56) (xy 101.6 38.1)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "cbae02af-b507-4d20-afa9-6eb3bcd4c210")
-	)
-	(wire
-		(pts
-			(xy 91.44 35.56) (xy 91.44 38.1)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "cc702141-998e-4536-92ae-b1f540c6705e")
 	)
 	(wire
 		(pts
@@ -13505,7 +13505,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Crystal:Crystal_SMD_2016-4Pin_2.0x1.6mm"
+		(property "Footprint" "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm_HandSoldering"
 			(at 292.1 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -13592,7 +13592,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C20617996"
+		(property "LCSC" "C9006"
 			(at 292.1 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -13603,7 +13603,7 @@
 				)
 			)
 		)
-		(property "Mouser" "520-250-10-37B-CTNT"
+		(property "Mouser" "520-250-12-33AGN-TR3"
 			(at 292.1 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -13614,7 +13614,7 @@
 				)
 			)
 		)
-		(property "Manufacturer_Part" "ECS-250-10-37B-CTN-TR"
+		(property "Manufacturer_Part" "ECS-250-12-33-AGN-TR3"
 			(at 292.1 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -13625,7 +13625,7 @@
 				)
 			)
 		)
-		(property "DigiKey" "XC3065CT-ND"
+		(property "DigiKey" "50-ECS-250-12-33-AGN-TR3CT-ND"
 			(at 292.1 93.98 0)
 			(hide yes)
 			(show_name no)
@@ -22125,10 +22125,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "5de3ef2d-914b-436f-9157-f137d3956ecd")
 		(property "Reference" "R31"
-			(at 99.06 38.1 90)
+			(at 99.06 37.084 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -22138,7 +22137,7 @@
 			)
 		)
 		(property "Value" "10k"
-			(at 99.06 40.64 90)
+			(at 99.06 39.624 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -24579,10 +24578,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "6fa6676b-9881-4ae1-a06b-8b9edaac03c7")
 		(property "Reference" "C8"
-			(at 88.9063 31.75 90)
+			(at 88.9 32.004 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -24592,7 +24590,7 @@
 			)
 		)
 		(property "Value" "22u"
-			(at 88.9063 34.29 90)
+			(at 88.9 34.544 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -30504,10 +30502,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "aeb695b2-5155-4cac-9d69-0604e15a9ee7")
 		(property "Reference" "R29"
-			(at 93.98 38.1 90)
+			(at 93.98 37.084 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -30517,7 +30514,7 @@
 			)
 		)
 		(property "Value" "120k"
-			(at 93.98 40.64 90)
+			(at 93.98 39.624 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
