@@ -1,6 +1,6 @@
 # ibScale MP Feeder - STM32F411CEU6 pin aliases
 # Names match mpconfigboard.h (pyb_pin_*) and lib/defaults.py pin strings.
-# Authoritative pin map: pcb/pcb.ioc (STM32CubeMX).
+# Authoritative pin map: pcb/ibScaleMPFeeder.ioc (STM32CubeMX).
 
 # Buttons
 BTNUP,PB13
