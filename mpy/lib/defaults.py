@@ -73,12 +73,12 @@ DEFAULT_SYSCONFIG = {
         "DRIVE1_PIN": "DRIVE1",
         "DRIVE2_PIN": "DRIVE2",
         "ENABLE_PIN": "DRIVEENABLE",
-        "TIMER_ID": 4,  # Match timer and frequency from mpconfigboard.h
+        "TIMER_ID": 3,  # Match timer and frequency from mpconfigboard.h
         "PWM_FREQUENCY": 25000,
-        "PEEL1_CH": 1,
-        "PEEL2_CH": 2,
-        "DRIVE1_CH": 3,
-        "DRIVE2_CH": 4,
+        "PEEL1_CH": 3,
+        "PEEL2_CH": 4,
+        "DRIVE1_CH": 1,
+        "DRIVE2_CH": 2,
         "DRIVE_PWM_MIN": 65,  # Minimum PWM it takes to get the motor to still freewheel without stalling
         "PEEL_PWM_MIN": 65,
         "AUTOBRAKE": True,  # Brake instead of stop/coast when speed set to 0
@@ -86,13 +86,13 @@ DEFAULT_SYSCONFIG = {
     "ENCODER": {
         "PINA": "DRIVEENCA",  # Pins are the same
         "PINB": "DRIVEENCB",
-        "TIMER": 3,  # 16-bit Hardware timer
-        "TIMER_AF": 2,  # Hardware encoder alternate function
-        "MAX": 65535,  # 16-bit timer, must match hardware timer used
+        "TIMER": 2,  # 32-bit Hardware timer
+        "TIMER_AF": 1,  # Hardware encoder alternate function
+        "MAX": 4294967295,  # 32-bit timer, must match hardware timer used
         "INVERT": False,  # Invert direction
     },
     "RS485": {
-        "UART_ID": 2,  # Taken from mpconfigboard.h
+        "UART_ID": 1,  # Taken from mpconfigboard.h
         "DE_PIN": "RS485DE",
         "BAUDRATE": 57600,  # Default for LumenPNP
         "DATA_BITS": 8,

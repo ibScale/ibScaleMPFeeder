@@ -31,7 +31,7 @@
 // NOTE: the buttons, drive-enable output, ADC voltage monitors, quadrature encoder,
 // motor/peel PWM and 1-Wire EEPROM are all configured by the frozen Python drivers
 // (lib/hardware/*) using the pin names in pins.csv - not by board #defines. Only the
-// hardware that MicroPython's C side owns (LEDs via pyb.LED, UART2 for RS485) is below.
+// hardware that MicroPython's C side owns (LEDs via pyb.LED, UART1 for RS485) is below.
 
 // RGB LEDs, by default PWM hardware assumes common Anode, where High is ON and Low is OFF
 // For common Cathode LEDs you need to invert the output in software. For example, with
@@ -49,10 +49,10 @@
 #define MICROPY_HW_LED_OFF(pin)   (mp_hal_pin_low(pin))
 
 // RS485
-#define MICROPY_HW_UART2_NAME   "RS485"
-#define MICROPY_HW_UART2_TX     (pyb_pin_RS485TX)
-#define MICROPY_HW_UART2_RX     (pyb_pin_RS485RX)
-#define MICROPY_HW_UART2_RTS    (pyb_pin_RS485DE)
+#define MICROPY_HW_UART1_NAME   "RS485"
+#define MICROPY_HW_UART1_TX     (pyb_pin_RS485TX)
+#define MICROPY_HW_UART1_RX     (pyb_pin_RS485RX)
+#define MICROPY_HW_UART1_RTS    (pyb_pin_RS485DE)
 
 // Use USB for REPL
 //#define MICROPY_HW_UART_REPL        (NULL)

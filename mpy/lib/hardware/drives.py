@@ -12,8 +12,8 @@ class HBridge:
     """Motor controller for DRIVE and PEEL motors using PWM H-bridge."""
     
     def __init__(self, peel1, peel2, drive1, drive2, enable,
-                 peelinvert=False, driveinvert=False, enableinvert=False, timer_id=4, pwm_frequency=25000,
-                 peel1_ch=1, peel2_ch=2, drive1_ch=3, drive2_ch=4, drive_pwm_min=65, peel_pwm_min=65, autobrake=False, DMESG=None, LOG=False):
+                 peelinvert=False, driveinvert=False, enableinvert=False, timer_id=3, pwm_frequency=25000,
+                 peel1_ch=3, peel2_ch=4, drive1_ch=1, drive2_ch=2, drive_pwm_min=65, peel_pwm_min=65, autobrake=False, DMESG=None, LOG=False):
         
         self.DMESG, self.LOG = DMESG, LOG
         self.drive_pwm_min, self.peel_pwm_min, self.auto_brake = drive_pwm_min, peel_pwm_min, autobrake

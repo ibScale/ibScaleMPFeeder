@@ -24,7 +24,7 @@ class RS485:
     send_packet(bytes) -> bool. Nothing else is required.
     """
 
-    def __init__(self, de_pin_name, uart_id=2, baudrate=9600, data_bits=8,
+    def __init__(self, de_pin_name, uart_id=1, baudrate=9600, data_bits=8,
                  parity=None, stop_bits=1, max_chunks=16, DMESG=None, LOG=False):
         self._dmesg, self._log_debug = DMESG, LOG
         self._de_pin_name, self._uart_id, self._baudrate = de_pin_name, uart_id, baudrate
