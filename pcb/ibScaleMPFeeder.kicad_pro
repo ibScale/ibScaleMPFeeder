@@ -102,26 +102,6 @@
         [
           "solder_mask_bridge|97902824|68181927|8b86532c-fc78-496c-a7d7-ab5fc8d2a555|01403b98-f0be-49e0-896e-b063272f55cf",
           ""
-        ],
-        [
-          "starved_thermal|121896754|69616005|01403b98-f0be-49e0-896e-b063272f55cf|afe89f4e-9f50-4a7b-896f-0509d0c438e7|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|121896754|74716005|01403b98-f0be-49e0-896e-b063272f55cf|3d9506d1-a38a-426a-a788-f9cb1de577a1|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|126996754|69616005|01403b98-f0be-49e0-896e-b063272f55cf|9e7e17a1-374e-46e5-a6ff-5a767fb2c132|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|126996754|74716005|01403b98-f0be-49e0-896e-b063272f55cf|0f41f1f2-beb7-454b-b664-5fabbad11a61|F.Cu",
-          ""
-        ],
-        [
-          "starved_thermal|126996754|74716005|01403b98-f0be-49e0-896e-b063272f55cf|0f41f1f2-beb7-454b-b664-5fabbad11a61|In2.Cu",
-          ""
         ]
       ],
       "meta": {
@@ -1088,7 +1068,7 @@
         "uuid": "347227a4-c111-4502-b3dd-e4a4bce3fd36"
       }
     ],
-    "used_designators": "#PWR34,#PWR64,TP9,U9,C33,D12",
+    "used_designators": "J6,#PWR34,#PWR45,#PWR64,TP9,U9,C33,D12",
     "variants": []
   },
   "sheets": [
